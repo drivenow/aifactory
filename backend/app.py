@@ -25,7 +25,7 @@ agent = LangGraphAgent(name="graphwrapper", graph=graph)
 add_langgraph_fastapi_endpoint(app, agent, "/agent")
 
 def main():
-    """Run the uvicorn server."""
+    """启动 uvicorn 服务（开发模式）"""
     port = int(os.getenv("PORT", "8001"))
     uvicorn.run("backend.app:app", host="0.0.0.0", port=port, reload=True)
 
@@ -46,3 +46,8 @@ http://localhost:8000/docs
 
 if __name__=="__main__":
     main()
+"""FastAPI 入口（AG-UI + LangGraph SSE）
+
+该模块将工作流图包装为 AG-UI 兼容的 SSE 服务端点，供 CopilotKit 前端消费。
+核心：`/agent` POST（SSE流）与 `/agent/health` 健康检查。
+"""

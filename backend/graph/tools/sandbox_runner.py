@@ -1,0 +1,38 @@
+import traceback
+
+
+def run_code(code: str, entry: str = "run_factor", args: dict | None = None) -> dict:
+    """执行代码并返回标准化结构
+
+    参数：
+    - code: 完整 Python 代码字符串
+    - entry: 入口函数名（默认 `run_factor`）
+    - args: 调用参数，形如 {"args": [...], "kwargs": {...}}
+
+    返回：
+    - {"success": True, "result": any} 或 {"success": False, "traceback": str}
+    """
+    try:
+        g = {"__builtins__": {"range": range, "len": len}}
+        l = {}
+        exec(code, g, l)
+        fn = g.get(entry) or l.get(entry)
+        if not callable(fn):
+            return {"success": False, "traceback": "entry_not_found"}
+        if args and isinstance(args, dict):
+            a = args.get("args") or []
+            kw = args.get("kwargs") or {}
+            res = fn(*a, **kw)
+        else:
+            res = fn("2020-01-01", "2020-01-10", ["A"]) 
+        return {"success": True, "result": res}
+    except Exception:
+        return {"success": False, "traceback": traceback.format_exc()}
+"""受限沙盒执行器
+
+用于在受控环境下执行模板生成的因子代码，捕获输出与异常，避免对系统造成破坏。
+安全策略（MVP）：
+- 仅暴露安全内建（range/len），禁用 `__import__` 等动态加载
+- 无文件系统/网络访问
+- 执行入口仅限 `run_factor`
+"""

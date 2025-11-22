@@ -10,11 +10,18 @@ from backend.graph import nodes
 
 
 def build_graph() -> StateGraph:
+    """构建工作流图
+
+    - 入口：`collect_spec`
+    - 纯 Command 路由：各节点内返回下一跳
+    - 终点：`finish -> END`
+    """
     g = StateGraph(FactorAgentState)
     g.add_node("collect_spec", nodes.collect_spec)
     g.add_node("gen_code_react", nodes.gen_code_react)
     g.add_node("dryrun", nodes.dryrun)
     g.add_node("semantic_check", nodes.semantic_check)
+    # 兼容层节点（保留但不使用）：react_retry_update / error_resume_router
     g.add_node("react_retry_update", nodes.react_retry_update)
     g.add_node("error_resume_router", nodes.error_resume_router)
     g.add_node("human_review_gate", nodes.human_review_gate)
@@ -23,46 +30,11 @@ def build_graph() -> StateGraph:
     g.add_node("finish", nodes.finish)
 
     g.set_entry_point("collect_spec")
-    g.add_edge("collect_spec", "gen_code_react")
-    g.add_edge("gen_code_react", "dryrun")
-    g.add_conditional_edges(
-        "dryrun",
-        nodes.error_resume_router,
-        {
-            "pass": "semantic_check",
-            "resume_to_gen_code_react": "gen_code_react",
-            "resume_to_dryrun": "dryrun",
-            "resume_to_semantic_check": "semantic_check",
-            "resume_to_human_review_gate": "human_review_gate",
-            "resume_to_backfill": "backfill_and_eval",
-            "resume_to_write_db": "write_db",
-        },
-    )
+    # 纯 Command 模式：由节点返回的 Command 控制路由，不声明中间边
 
-    g.add_conditional_edges(
-        "semantic_check",
-        nodes.react_retry_router,
-        {
-            "pass": "human_review_gate",
-            "retry": "react_retry_update",
-        },
-    )
-
-    g.add_edge("react_retry_update", "gen_code_react")
-
-    g.add_conditional_edges(
-        "human_review_gate",
-        lambda s: s.get("human_review_status", "approved"),
-        {
-            "approved": "backfill_and_eval",
-            "edited": "backfill_and_eval",
-            "rejected": "finish",
-        },
-    )
-
-    g.add_edge("backfill_and_eval", "write_db")
-    g.add_edge("write_db", "finish")
+    # 终点边：finish → END
     g.add_edge("finish", END)
+    # 保留：finish 边已声明
 
     return g
 
@@ -72,4 +44,10 @@ graph_image = graph.get_graph().draw_mermaid_png()
 with open("workflow.png", "wb") as f:
     f.write(graph_image)
 print("流程图已保存为 workflow.png")
+"""图编排定义（纯 Command 路由）
+
+本模块构建 LangGraph 工作流。节点自身用 `Command(goto=..., update=...)` 控制路由，
+因此在图层只保留必要的入口与终点边，避免多节点并发写同一键导致的通道冲突。
+兼容层节点（如 `error_resume_router`、`react_retry_update`）被保留但不参与路由。
+"""
 
