@@ -1,0 +1,10 @@
+export default function MetricsPanel({ state }: { state: any }) {
+  const metrics = state?.eval_metrics;
+  if (!metrics) return null;
+  return (
+    <div style={{ border: "1px solid #999", padding: 8, borderRadius: 8, marginTop: 12 }}>
+      <div>Metrics</div>
+      <pre style={{ margin: 0 }}>{JSON.stringify(metrics, null, 2)}</pre>
+    </div>
+  );
+}

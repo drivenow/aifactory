@@ -2,6 +2,7 @@ from typing import Dict, Any
 
 from pydantic import BaseModel, Field
 from langgraph.types import Command
+from langgraph.graph import END
 
 from .state import FactorAgentState
 from .tools.factor_template import render_factor_code, simple_factor_body_from_spec
@@ -179,9 +180,40 @@ def react_retry_update(state: FactorAgentState) -> FactorAgentState:
 
 
 def human_review_gate(state: FactorAgentState):
-    """人审阶段：默认 approved，真实 HITL 场景由前端 `ui_response` 更新状态"""
-    status = state.get("human_review_status") or "approved"
-    return Command(goto="backfill_and_eval", update={"human_review_status": status, "last_success_node": "human_review_gate", "error": None, "route": "backfill_and_eval"})
+    # 尝试从最新用户消息解析 code_review_response
+    msgs = state.get("messages", [])
+    if isinstance(msgs, list) and msgs:
+        last = msgs[-1]
+        content = None
+        if isinstance(last, dict):
+            content = last.get("content")
+        else:
+            content = getattr(last, "content", None)
+        if isinstance(content, str):
+            if content.startswith("code_review_response:"):
+                try:
+                    import json
+                    obj = json.loads(content.split(":", 1)[1])
+                    status_candidate = obj.get("status")
+                    edited_code = obj.get("edited_code")
+                    if status_candidate in ("approved", "edited", "rejected"):
+                        state["human_review_status"] = status_candidate
+                        if status_candidate in ("approved", "edited") and edited_code:
+                            state["human_edits"] = edited_code
+                            state["factor_code"] = edited_code
+                except Exception:
+                    pass
+            elif content in ("approved", "edited", "rejected"):
+                state["human_review_status"] = content
+    status = state.get("human_review_status") or "pending"
+    if status in ("approved", "edited"):
+        code = state.get("human_edits") or state.get("factor_code")
+        update = {"ui_request": None, "human_review_status": status, "factor_code": code, "last_success_node": "human_review_gate", "error": None, "route": "backfill_and_eval"}
+        return Command(goto="backfill_and_eval", update=update)
+    if status == "rejected":
+        return Command(goto="finish", update={"ui_request": None, "human_review_status": status, "last_success_node": "human_review_gate", "error": None, "route": "finish"})
+    req = {"type": "code_review", "code": state.get("factor_code", ""), "actions": ["approve", "edit", "reject"]}
+    return {"ui_request": req, "should_interrupt": True, "route": "human_review_gate"}
 
 
 def backfill_and_eval(state: FactorAgentState):
@@ -202,8 +234,7 @@ def write_db(state: FactorAgentState):
 
 
 def finish(state: FactorAgentState):
-    """结束节点：返回最终状态，不再路由"""
-    return {}
+    return Command(goto=END, update={})
 """工作流节点实现（纯 Command 路由）
 
 该模块实现因子编码助手的各阶段节点：收集规格、代码生成、试运行、语义检查、

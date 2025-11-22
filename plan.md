@@ -263,6 +263,12 @@ def write_factor_and_metrics_mock(name, metrics, values_artifact) -> dict: ...
 
 ---
 
+**重要路由行为说明 (langgraph==1.0.3)**
+
+> 经过验证，当一个节点同时拥有静态出边（通过 `graph.add_edge()` 定义）并返回一个 `Command(goto=...)` 时，**两个路径都会被执行**。`Command(goto=...)` **不会**覆盖静态边。这种行为可能导致非预期的并行执行和状态冲突。
+>
+> **最佳实践**：为保证路由的唯一性和可预测性，本项目采用**纯 Command 路由模式**。即，不在图定义中设置任何中间边或终点边，所有节点的下一跳（包括结束 `END`）都必须由节点自身返回的 `Command` 对象来指定。
+
 ### 2.6 HITL（Human-in-the-Loop）事件流
 
 节点：`human_review_gate`

@@ -33,7 +33,7 @@ def build_graph() -> StateGraph:
     # 纯 Command 模式：由节点返回的 Command 控制路由，不声明中间边
 
     # 终点边：finish → END
-    g.add_edge("finish", END)
+    # g.add_edge("finish", END)
     # 保留：finish 边已声明
 
     return g
