@@ -1,0 +1,180 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+pip-wheel-metadata/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.pytest_cache/
+cover/
+
+# MyPy / type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+
+# Logs
+*.log
+
+# Local env / settings
+.env
+.env.*
+.venv/
+venv/
+ENV/
+env/
+*.env
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# IPython / interactive
+.profile_default/
+ipython_config.py
+
+# PyCharm / VS Code / other IDEs
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# Rope project settings
+.ropeproject/
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# Mac / Windows / Linux OS files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.swp
+*.swo
+
+# Django stuff:
+*.sqlite3
+db.sqlite3
+staticfiles/
+media/
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# FastAPI / Starlette
+*.db
+*.sqlite
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# MkDocs documentation
+site/
+
+# Pyre / Pysa
+.pyre_configuration/
+.pysa_cache/
+
+# Poetry
+poetry.lock
+
+# PDM
+.pdm.toml
+pdm.lock
+
+# uv
+.uv/
+
+# Hatch
+.hatch/
+
+# Virtual environment metadata
+pyvenv.cfg
+
+# Local runtime / cache
+.cache/
+*.pid
+*.seed
+*.bak
+
+# Data / model artifacts (adjust to your project)
+data/
+datasets/
+models/
+outputs/
+checkpoints/
+*.pkl
+*.joblib
+*.h5
+*.pt
+*.ckpt
+
+# Notebooks exports
+*.html
+*.pdf
+
+# Terraform / infra (if any)
+.terraform/
+*.tfstate
+*.tfstate.*
+
+# Secrets / keys
+*.pem
+*.key
+*.crt
+secrets/
