@@ -1,29 +1,31 @@
-## 风险与影响评估
-- 安全风险：前端可控的 `thread_id` 可能导致会话串线或跨租户读取检查点；可预见性或被猜测引发会话劫持。
-- 一致性风险：`state.thread_id` 与 `configurable.thread_id` 可能不一致，检查点读写发生错位，恢复到错误线程。
-- 负载风险：把 `thread_id` 放入 `state_update` 会增加事件负载但一般可控；若状态体积过大需做精简。
-- 并发风险：同一 `thread_id` 多客户端并发写导致检查点竞态；需要加锁或串行化。
-- 可维护性风险：将 `thread_id` 参与业务分支可能导致逻辑耦合，应保持只读展示属性。
-
-## 方案与约束
-- 只读展示：将 `thread_id` 放入 `FactorAgentState` 仅用于前端展示与追踪，禁止参与任何分支判断。
-- 权威标识：检查点与恢复仅使用 `configurable.thread_id`；每次 `invoke` 都以此为准来读写检查点。
-- 校验与回填：请求处理阶段生成/校验 `thread_id`；若前端传入，需校验归属（鉴权）和存在；把该值写入 `init_state.thread_id` 供前端显示。
-- 一致性守卫：调用前校验 `state.thread_id == configurable.thread_id`，不一致则以 `configurable.thread_id` 为准更新 `state.thread_id` 并记录告警。
-- 持久化记忆：使用 `SqliteSaver(".cache/graph.sqlite")`（或 `MemorySaver` 开发态）作为 checkpointer，命名空间可加租户前缀避免冲突。
-- 并发控制：对同一 `thread_id` 采用进程内锁或队列串行执行；至少在 FastAPI 层做互斥。
-- 附加标识：为每次调用生成 `run_id`，以及 `checkpoint_seq` 或时间戳，帮助前端追踪调用时间线。
+## 目标
+- 启用 LangGraph 检查点记忆（按 thread_id 持久化），同线程可断点续跑。
+- 当流程节点出错时，回退到上一个成功步骤的下一步，自动重入失败节点。
+- 精简状态扩展：仅添加 `thread_id`（只读展示）、`run_id`（调用ID）、`last_success_node`（记录上次成功节点）。
 
 ## 技术改动
-1. `FactorAgentState` 增加只读元信息：`thread_id`, `run_id`, `checkpoint_seq`，并保留 `last_success_node`, `failed_node`, `node_error`。
-2. `graph.compile(checkpointer=SqliteSaver(...))` 启用检查点。
-3. `/agent/run` 接收或生成 `thread_id`，传入 `configurable.thread_id`；同时写入 `init_state.thread_id` 与 `run_id`。
-4. 在节点成功时更新 `last_success_node`；失败写入 `node_error/failed_node`。
-5. 新增 `error_resume_router` 与 `backtrack_dispatch`，在主链关键节点后添加条件边以实现回退到上一个成功节点。
-6. 统一校验：在入口层或首节点，对 `state.thread_id` 与 `configurable.thread_id` 进行一致性校验与修复。
-7. 并发与鉴权：为同 `thread_id` 加互斥；校验 `thread_id` 归属，拒绝跨用户使用。
+- `backend/graph/state.py`
+  - 新增字段：`thread_id: Optional[str]`, `run_id: Optional[str]`, `last_success_node: Optional[str]`
+- `backend/graph/graph.py`
+  - 使用 `MemorySaver`（或 `SqliteSaver`）作为 `checkpointer`：`graph = build_graph().compile(checkpointer=MemorySaver())`
+  - 在关键节点后插入错误路由：`error_resume_router` 判断异常，`resume_to_last` → `backtrack_dispatch`，`pass` → 原既有下一步
+  - `backtrack_dispatch` 根据 `last_success_node` 返回下一步节点名（如 `collect_spec→gen_code_react`, `gen_code_react→dryrun`, `dryrun→semantic_check`, ...）
+- `backend/graph/nodes.py`
+  - 为关键节点（`collect_spec`, `gen_code_react`, `dryrun`, `semantic_check`, `human_review_gate`, `backfill_and_eval`, `write_db`）添加成功路径更新 `last_success_node`
+  - 在 `dryrun` 检测 `factor_code` 中出现 `raise NotImplementedError` 时标记失败（不抛异常），以触发回退路由
+  - 新增 `error_resume_router(state)`：根据 `dryrun_result.success` 等判断是否需要回退；新增 `backtrack_dispatch(state)`：根据 `last_success_node` 返回下一步节点
+- `backend/app.py`
+  - `/agent/run` 支持 `thread_id`（用于检查点）与生成 `run_id`（返回前端展示）
+  - 调用：`graph.invoke(init_state, config={'configurable': {'thread_id': thread_id}})`，并把 `thread_id/run_id` 写入 `init_state`
 
-## 示例与验证
-- 启动服务后，使用固定 `thread_id` 连续两次调用，验证检查点记忆；
-- 模拟节点抛错，观察是否自动回到 `last_success_node` 并继续运行；
-- 前端通过 `state_update` 获取 `thread_id/run_id/checkpoint_seq` 展示会话与步骤时间线。
+## 验证
+1. 启动服务，使用固定 `thread_id` 连续调用，观察状态是否续跑。
+2. 使用未知因子描述触发 `dryrun` 失败，验证自动回退到上一个成功步骤并重入。
+3. 正常因子描述（如“5日滚动均值因子”）应生成代码与 mock 指标，并返回 `db_write_status=success`。
+
+## Implementation Checklist
+1. 扩展 `FactorAgentState` 字段：`thread_id/run_id/last_success_node`
+2. 在 `graph.py` 启用 `checkpointer` 并新增错误路由与回退派发
+3. 在 `nodes.py` 更新各节点：成功写 `last_success_node`；`dryrun` 对未实现体设为失败
+4. 在 `app.py` 接收传入/生成 `thread_id`，生成 `run_id`，并在 `invoke` 时传入 `configurable.thread_id`
+5. 本地运行示例：成功路径与失败回退路径均验证通过

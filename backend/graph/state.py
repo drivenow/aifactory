@@ -14,3 +14,6 @@ class FactorAgentState(TypedDict, total=False):
     eval_metrics: Optional[Dict]
     backfill_job_id: Optional[str]
     db_write_status: Optional[str]
+    thread_id: Optional[str]
+    run_id: Optional[str]
+    last_success_node: Optional[str]
