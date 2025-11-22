@@ -6,9 +6,22 @@ from .tools import mock_evals
 
 
 def collect_spec(state: FactorAgentState) -> FactorAgentState:
-    spec = state.get("user_spec") or ""
+    spec = state.get("user_spec")
+    if not spec:
+        msgs = state.get("messages", [])
+        if isinstance(msgs, list) and msgs:
+            last = msgs[-1]
+            if isinstance(last, dict):
+                spec = last.get("content", "") or str(last)
+            else:
+                c = getattr(last, "content", None)
+                if c is None:
+                    c = getattr(last, "text", None)
+                spec = c if c is not None else str(last)
+        else:
+            spec = ""
     name = state.get("factor_name") or "factor"
-    return {"user_spec": spec, "factor_name": name, "retries_left": state.get("retries_left", 5), "last_success_node": "collect_spec"}
+    return {"user_spec": spec, "factor_name": name, "retries_left": state.get("retries_left", 5), "last_success_node": "collect_spec", "error": None}
 
 
 def gen_code_react(state: FactorAgentState) -> FactorAgentState:
@@ -17,7 +30,7 @@ def gen_code_react(state: FactorAgentState) -> FactorAgentState:
         name = state.get("factor_name") or "factor"
         body = simple_factor_body_from_spec(spec)
         code = render_factor_code(name, spec, body)
-        return {"factor_code": code, "last_success_node": "gen_code_react"}
+        return {"factor_code": code, "last_success_node": "gen_code_react", "error": None}
     except Exception as e:
         return {"error": {"node": "gen_code_react", "message": str(e)}}
 
@@ -26,14 +39,14 @@ def dryrun(state: FactorAgentState) -> FactorAgentState:
     code = state.get("factor_code", "")
     if "raise NotImplementedError" in code:
         return {"dryrun_result": {"success": False}, "retries_left": max(0, state.get("retries_left", 0) - 1), "error": {"node": "dryrun", "message": "factor not implemented"}}
-    return {"dryrun_result": {"success": True}, "last_success_node": "dryrun"}
+    return {"dryrun_result": {"success": True}, "last_success_node": "dryrun", "error": None}
 
 
 def semantic_check(state: FactorAgentState) -> FactorAgentState:
     spec = state.get("user_spec", "")
     code = state.get("factor_code", "")
     ok = bool(spec) and bool(code)
-    return {"semantic_check": {"pass": ok}, "last_success_node": "semantic_check" if ok else state.get("last_success_node")}
+    return {"semantic_check": {"pass": ok}, "last_success_node": "semantic_check" if ok else state.get("last_success_node"), "error": None}
 
 
 def error_resume_router(state: FactorAgentState) -> str:
@@ -76,12 +89,12 @@ def react_retry_router(state: FactorAgentState) -> str:
 
 def react_retry_update(state: FactorAgentState) -> FactorAgentState:
     retries = state.get("retries_left", 0)
-    return {"retries_left": max(0, retries - 1)}
+    return {"retries_left": max(0, retries - 1), "error": None}
 
 
 def human_review_gate(state: FactorAgentState) -> FactorAgentState:
     status = state.get("human_review_status") or "approved"
-    return {"human_review_status": status, "last_success_node": "human_review_gate"}
+    return {"human_review_status": status, "last_success_node": "human_review_gate", "error": None}
 
 
 def backfill_and_eval(state: FactorAgentState) -> FactorAgentState:
@@ -89,14 +102,14 @@ def backfill_and_eval(state: FactorAgentState) -> FactorAgentState:
     to = mock_evals.factor_turnover_mock()
     gp = mock_evals.factor_group_perf_mock()
     metrics = {"ic": ic, "turnover": to, "group_perf": gp}
-    return {"eval_metrics": metrics, "last_success_node": "backfill_and_eval"}
+    return {"eval_metrics": metrics, "last_success_node": "backfill_and_eval", "error": None}
 
 
 def write_db(state: FactorAgentState) -> FactorAgentState:
     name = state.get("factor_name") or "factor"
     metrics = state.get("eval_metrics", {})
     res = mock_evals.write_factor_and_metrics_mock(name, metrics)
-    return {"db_write_status": res.get("status", "success"), "last_success_node": "write_db"}
+    return {"db_write_status": res.get("status", "success"), "last_success_node": "write_db", "error": None}
 
 
 def finish(state: FactorAgentState) -> FactorAgentState:

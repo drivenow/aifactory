@@ -1,7 +1,6 @@
 import json
 
 from backend.graph.graph import graph
-from backend.app import app
 
 def test_graph_success_flow():
     s = graph.invoke(
@@ -35,20 +34,4 @@ def test_graph_failure_flow_human_review():
     assert s.get("last_success_node") == "write_db"
 
 
-def test_api_success_flow():
-    from fastapi.testclient import TestClient
-
-    client = TestClient(app)
-    resp = client.post(
-        "/agent/run",
-        json={
-            "user_spec": "5日滚动均值因子",
-            "factor_name": "MA5",
-            "thread_id": "t-api",
-        },
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    state = body.get("state", {})
-    assert state.get("db_write_status") == "success"
-    assert state.get("last_success_node") == "write_db"
+# API 端到端测试依赖 ag_ui_langgraph 的 SSE 端点，后续可补充专用用例

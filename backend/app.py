@@ -1,30 +1,48 @@
+import sys
+import os
+module_path = "/Users/fullmetal/Documents/agent_demo"
+print(module_path)
+sys.path.append(module_path)
+from ag_ui_langgraph import add_langgraph_fastapi_endpoint
+from backend.graph.graph import graph
 from fastapi import FastAPI
-import uuid
+from fastapi.middleware.cors import CORSMiddleware
+from ag_ui_langgraph import add_langgraph_fastapi_endpoint, LangGraphAgent
+import os
+import uvicorn
 
-try:
-    from ag_ui_langgraph import add_langgraph_fastapi_endpoint  # type: ignore
-except Exception:
-    add_langgraph_fastapi_endpoint = None
+app = FastAPI(title="langgraph demo with agui")
 
-from .graph.graph import graph
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Or ["http://localhost:3000"] for security
+    allow_credentials=True,  # Add this for cookies/SSE if needed
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+agent = LangGraphAgent(name="graphwrapper", graph=graph)
+add_langgraph_fastapi_endpoint(app, agent, "/agent")
+
+def main():
+    """Run the uvicorn server."""
+    port = int(os.getenv("PORT", "8001"))
+    uvicorn.run("backend.app:app", host="0.0.0.0", port=port, reload=True)
 
 
-app = FastAPI()
+"""
+add_langgraph_fastapi_endpoint(app, graph, "/agent") 会自动生成 AG-UI 兼容的路由，至少包括：
+(1)运行 graph 并返回 SSE 事件流
+- POST /agent
+- Accept: text/event-stream 时会以 SSE 连续吐事件
+(2) 健康检查
+- GET /agent/health
+- Human-in-loop 回传接口 路径通常是 /agent/human-feedback 或 /agent/feedback
 
-if add_langgraph_fastapi_endpoint is not None:
-    add_langgraph_fastapi_endpoint(app, graph, "/agent")
+(3)怎么确认 human-feedback 的准确路径？
+启动服务后打开：
+http://localhost:8000/docs
+"""
 
-
-@app.post("/agent/run")
-async def run_agent(payload: dict):
-    thread_id = payload.get("thread_id") or str(uuid.uuid4())
-    run_id = str(uuid.uuid4())
-    init_state = {
-        "user_spec": payload.get("user_spec", ""),
-        "factor_name": payload.get("factor_name", "factor"),
-        "retries_left": 5,
-        "thread_id": thread_id,
-        "run_id": run_id,
-    }
-    result = graph.invoke(init_state, config={"configurable": {"thread_id": thread_id}})
-    return {"state": result}
+if __name__=="__main__":
+    main()
