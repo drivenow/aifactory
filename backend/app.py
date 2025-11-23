@@ -16,12 +16,12 @@ app = FastAPI(title="langgraph demo with agui")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Or ["http://localhost:3000"] for security
-    allow_credentials=True,  # Add this for cookies/SSE if needed
+    allow_credentials=False,  # Add this for cookies/SSE if needed
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-agent = LangGraphAgent(name="graphwrapper", graph=graph)
+agent = LangGraphAgent(name="factor_agent", graph=graph)
 add_langgraph_fastapi_endpoint(app, agent, "/agent")
 
 @app.middleware("http")
@@ -37,24 +37,7 @@ async def log_requests(request, call_next):
         pass
     return response
 
-@app.post("/agent/human-feedback")
-async def human_feedback(payload: dict):
-    thread_id = payload.get("threadId") or payload.get("thread_id")
-    feedback = payload.get("human_feedback") or payload.get("feedback") or {}
-    status = feedback.get("human_review_status") or feedback.get("status")
-    edited_code = feedback.get("factor_code") or feedback.get("edited_code")
-    cfg = {"configurable": {"thread_id": thread_id}}
-    updates = {}
-    if status:
-        updates["human_review_status"] = status
-        if status in ("approved", "edited") and edited_code:
-            updates["human_edits"] = edited_code
-            updates["factor_code"] = edited_code
-    graph.update_state(cfg, updates)
-    return {"ok": True}
-
 # 使用默认 AG-UI 端点：/agent（POST，SSE）与 /agent/health（GET）
-
 def main():
     """启动 uvicorn 服务（开发模式）"""
     port = int(os.getenv("PORT", "8001"))

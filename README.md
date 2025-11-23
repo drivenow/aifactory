@@ -21,7 +21,7 @@
   - `POST /agent/feedback`：接收人审反馈（CopilotKit runtime 适配器调用）
 - 前端（Next.js + CopilotKit）：
   - `CopilotRuntime` 在 `route.ts` 注册 `factor_agent`
-  - `LangGraphHttpAgent({ url: process.env.AGENT_URL || "http://localhost:8002/agent" })`
+  - `LangGraphHttpAgent({ url: process.env.AGENT_URL || "http://localhost:8001/agent" })`
   - 页面使用 `useCopilotAgent("factor_agent")` 获取 `state/events/status/agent`
   - 组件：TracePane（事件流）、CodeReviewPanel（人审）、MetricsPanel（指标）、StatusBadge（状态）
 
@@ -40,7 +40,7 @@
 
 ```bash
 cd /Users/fullmetal/Documents/agent_demo
-python -m uvicorn backend.app:app --host 0.0.0.0 --port 8002
+python -m uvicorn backend.app:app --host 0.0.0.0 --port 8001
 ```
 
 2) 使用 `backend/app.py` 中的入口（默认端口 8001，可通过环境变量 `PORT` 覆盖）：
@@ -53,14 +53,14 @@ PORT=8001 python backend/app.py
 健康检查：
 
 ```bash
-curl -s http://localhost:8002/agent/health
+curl -s http://localhost:8001/agent/health
 # 返回示例：{"status":"ok","agent":{"name":"graphwrapper"}}
 ```
 
 SSE 独立验证（后端单跑）：
 
 ```bash
-curl -N -X POST http://localhost:8002/agent \
+curl -N -X POST http://localhost:8001/agent \
   -H "Content-Type: application/json" \
   -H "Accept: text/event-stream" \
   -d '{
@@ -97,7 +97,7 @@ import { LangGraphHttpAgent } from "@copilotkit/runtime/agents";
 const runtime = new CopilotRuntime({
   agents: {
     factor_agent: new LangGraphHttpAgent({
-      url: process.env.AGENT_URL || "http://localhost:8002/agent",
+      url: process.env.AGENT_URL || "http://localhost:8001/agent",
     }),
   },
 });
@@ -128,7 +128,7 @@ AGENT_URL=http://localhost:8001/agent npm run dev
 后端手工验证（仅用于排查适配器与路径）：
 
 ```bash
-curl -s -X POST http://localhost:8002/agent/feedback \
+curl -s -X POST http://localhost:8001/agent/feedback \
   -H "Content-Type: application/json" \
   -d '{
     "threadId":"t-debug-001",
@@ -162,7 +162,7 @@ curl -s -X POST http://localhost:8002/agent/feedback \
 ```tsx
 <pre>{JSON.stringify({
   node: state?.last_success_node,
-  retries: state?.retries_left,
+  retries: state?.retry_count,
   human: state?.human_review_status,
 }, null, 2)}</pre>
 ```

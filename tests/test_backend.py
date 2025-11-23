@@ -7,7 +7,7 @@ def test_graph_success_flow():
         {
             "user_spec": "5日滚动均值因子",
             "factor_name": "MA5",
-            "retries_left": 5,
+            "retry_count": 0,
             "thread_id": "t-success",
             "run_id": "r-success",
         },
@@ -23,7 +23,7 @@ def test_graph_failure_flow_human_review():
         {
             "user_spec": "未知因子",
             "factor_name": "X",
-            "retries_left": 1,
+            "retry_count": 1,
             "thread_id": "t-fail",
             "run_id": "r-fail",
         },

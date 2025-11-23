@@ -30,7 +30,7 @@ def make_min_payload(
         "state": state or {
             "user_spec": content,
             "factor_name": "MA5",
-            "retries_left": 0,
+            "retry_count": 0,
         },
     }
     return payload
