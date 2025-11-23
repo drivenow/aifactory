@@ -4,8 +4,10 @@ from __future__ import annotations
 from typing import Dict, Any, Optional
 
 from pydantic import BaseModel, Field
-from langgraph.types import Command
 from langgraph.graph import END
+# nodes.py 顶部
+from langgraph.types import Command, interrupt
+
 
 from .state import FactorAgentState
 from .tools.factor_template import render_factor_code, simple_factor_body_from_spec
@@ -263,62 +265,15 @@ def semantic_check(state: FactorAgentState) -> Command:
         },
         target_if_retry="gen_code_react",
     )
-
-
 def human_review_gate(state: FactorAgentState) -> Command:
     """
-    HITL 节点（方案 A）
+    HITL 节点（LangGraph 1.0 风格）
 
-    - 第一次进入该节点：发 ui_request 并 interrupt
-    - 前端提交 ui_response 后（ag-ui-langgraph 会 merge 到 state），再次进入该节点：读取 ui_response 并路由
+    - 第一次执行到这里：调用 interrupt(req) → 图暂停，返回给前端一个中断事件
+    - 前端在人审 UI 里点 approve/edit/reject 后，通过 ag-ui 回传 ui_response
+    - 第二次执行到这里：interrupt(req) 会直接返回这次 ui_response，继续走后续逻辑
     """
-    # 1) 若已有 ui_response，说明人已经审完：读取并继续
-    ui_resp = state.get("ui_response")
-    if isinstance(ui_resp, dict) and ui_resp:
-        status = ui_resp.get("status") or ui_resp.get("human_review_status")
-        edited_code = ui_resp.get("edited_code") or ui_resp.get("factor_code")
 
-        print(
-            f"[DBG] human_review_gate resume thread={state.get('thread_id')} "
-            f"status={status}"
-        )
-
-        if status in ("approved", "edited"):
-            final_code = edited_code or state.get("factor_code")
-            return Command(
-                goto="backfill_and_eval",
-                update={
-                    "ui_request": None,
-                    "ui_response": None,  # 清理，避免重复消费
-                    "human_review_status": status,
-                    "human_edits": edited_code,
-                    "factor_code": final_code,
-                    "last_success_node": "human_review_gate",
-                    "error": None,
-                    "route": "backfill_and_eval",
-                },
-            )
-
-        if status == "rejected":
-            return Command(
-                goto="finish",
-                update={
-                    "ui_request": None,
-                    "ui_response": None,
-                    "human_review_status": "rejected",
-                    "last_success_node": "human_review_gate",
-                    "error": None,
-                    "route": "finish",
-                },
-            )
-
-        # 状态不合法 → 当作未审，重新发起 request
-        print(
-            f"[DBG] human_review_gate invalid ui_response, re-request "
-            f"thread={state.get('thread_id')}"
-        )
-
-    # 2) 没有 ui_response：发起人审请求并 interrupt
     req = {
         "type": "code_review",
         "title": "Review generated factor code",
@@ -327,16 +282,62 @@ def human_review_gate(state: FactorAgentState) -> Command:
         "retry_count": int(state.get("retry_count", 0)),
     }
 
-    print(f"[DBG] human_review_gate interrupt thread={state.get('thread_id')}")
+    # 在 state 里也记一份，方便前端直接从 agentState 读取
+    # 第一次跑到这里时，下面这句不会被真正“执行完”，因为 interrupt 会先中断返回
+    ui_resp = interrupt(req)
 
+    # 只有“恢复运行”的时候，才会执行到下面这些代码
+    print(
+        f"[DBG] human_review_gate resume thread={state.get('thread_id')} "
+        f"resp={ui_resp}"
+    )
+
+    status = ui_resp.get("status") or ui_resp.get("human_review_status")
+    edited_code = ui_resp.get("edited_code") or ui_resp.get("factor_code")
+
+    if status in ("approved", "edited"):
+        final_code = edited_code or state.get("factor_code")
+
+        return Command(
+            goto="backfill_and_eval",
+            update={
+                "ui_request": req,              # 方便前端展示上下文
+                "ui_response": ui_resp,         # 记录人审结果
+                "human_review_status": status,
+                "human_edits": edited_code,
+                "factor_code": final_code,
+                "last_success_node": "human_review_gate",
+                "error": None,
+                "route": "backfill_and_eval",
+            },
+        )
+
+    if status == "rejected":
+        return Command(
+            goto="finish",
+            update={
+                "ui_request": req,
+                "ui_response": ui_resp,
+                "human_review_status": "rejected",
+                "last_success_node": "human_review_gate",
+                "error": None,
+                "route": "finish",
+            },
+        )
+
+    # 万一前端传了个奇怪的 status，当 reject 处理
     return Command(
-        goto="__interrupt__",  # ✅ 标准 interrupt
+        goto="finish",
         update={
             "ui_request": req,
-            "human_review_status": "pending",
-            "should_interrupt": True,
+            "ui_response": ui_resp,
+            "human_review_status": "rejected",
             "last_success_node": "human_review_gate",
-            "route": "human_review_gate",
+            "error": {
+                "node": "human_review_gate",
+                "message": f"invalid ui_response status={status!r}",
+            },
+            "route": "finish",
         },
     )
 

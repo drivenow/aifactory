@@ -1,9 +1,5 @@
 import sys
 import os
-module_path = "/Users/fullmetal/Documents/agent_demo"
-print(module_path)
-sys.path.append(module_path)
-from ag_ui_langgraph import add_langgraph_fastapi_endpoint
 from backend.graph.graph import graph
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

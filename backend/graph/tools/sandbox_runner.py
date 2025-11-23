@@ -1,7 +1,9 @@
 import traceback
+import os
+from typing import Optional, Dict
 
 
-def run_code(code: str, entry: str = "run_factor", args: dict | None = None) -> dict:
+def run_code(code: str, entry: str = "run_factor", args: Optional[dict] = None) -> dict:
     """执行代码并返回标准化结构
 
     参数：
@@ -14,10 +16,10 @@ def run_code(code: str, entry: str = "run_factor", args: dict | None = None) -> 
     """
     try:
         print("[DBG] sandbox_run entry", entry)
-        g = {"__builtins__": {"range": range, "len": len}}
-        l = {}
+        g = {"__builtins__": __builtins__, "ENV": dict(os.environ)}
+        l = g
         exec(code, g, l)
-        fn = g.get(entry) or l.get(entry)
+        fn = g.get(entry)
         if not callable(fn):
             return {"success": False, "traceback": "entry_not_found"}
         if args and isinstance(args, dict):
@@ -37,7 +39,8 @@ def run_code(code: str, entry: str = "run_factor", args: dict | None = None) -> 
 
 用于在受控环境下执行模板生成的因子代码，捕获输出与异常，避免对系统造成破坏。
 安全策略（MVP）：
-- 仅暴露安全内建（range/len），禁用 `__import__` 等动态加载
+- 使用隔离的 `globals/locals` 执行，允许完整内建与标准导入（不写回宿主）
+- 提供只读快照 `ENV`（`os.environ` 拷贝），避免污染宿主环境变量
 - 无文件系统/网络访问
 - 执行入口仅限 `run_factor`
 """

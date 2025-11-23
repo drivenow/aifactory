@@ -1,39 +1,43 @@
+// app/api/copilotkit/route.ts
+
 import {
   CopilotRuntime,
   copilotRuntimeNextJSAppRouterEndpoint,
-  LangGraphHttpAgent,
+  ExperimentalEmptyAdapter,
 } from "@copilotkit/runtime";
-import type { NextRequest } from "next/server";
+import { LangGraphHttpAgent } from "@ag-ui/langgraph";
+import { NextRequest } from "next/server";
 
-const agentUrl =
-  process.env.AGENT_URL || "http://localhost:8001/agent/factor_agent"; // 记得对齐后端
+// 对齐后端 FastAPI：add_langgraph_fastapi_endpoint(app, agent, "/agent")
+const agentUrl = process.env.AGENT_URL || "http://localhost:8001/agent";
 
-if (process.env.NODE_ENV !== "production") {
-  console.log("[DBG] copilot runtime init agentUrl=", agentUrl);
-}
+// 单 agent 场景，用 EmptyAdapter 即可
+const serviceAdapter = new ExperimentalEmptyAdapter();
 
+// CopilotRuntime：注册一个名为 factor_agent 的 LangGraph 代理
 const runtime = new CopilotRuntime({
   agents: {
-    factor_agent: new LangGraphHttpAgent({ url: agentUrl }),
+    // 这里的 key 要和 <CopilotKit agent="factor_agent" />、后端 LangGraphAgent(name="factor_agent") 一致
+    factor_agent: new LangGraphHttpAgent({
+      url: agentUrl,
+    }),
   },
 });
 
-const { handleRequest, GET: _GET, POST: _POST } =
-  copilotRuntimeNextJSAppRouterEndpoint({
+// CopilotKit 会用 POST /api/copilotkit 做所有交互
+export const POST = async (req: NextRequest) => {
+  const { handleRequest } = copilotRuntimeNextJSAppRouterEndpoint({
     runtime,
+    serviceAdapter,
     endpoint: "/api/copilotkit",
   });
 
-export async function GET(req: NextRequest) {
-  if (process.env.NODE_ENV !== "production") {
-    console.log("[DBG] copilotkit GET", req.headers.get("accept"));
-  }
-  return _GET(req);
-}
-
-export async function POST(req: NextRequest) {
   if (process.env.NODE_ENV !== "production") {
     console.log("[DBG] copilotkit POST", req.headers.get("content-type"));
   }
-  return _POST(req);
-}
+
+  return handleRequest(req);
+};
+
+// 可选：如果你想让 GET /api/copilotkit 也返回一点东西，可以解开这段
+// export const GET = async () => Response.json({ status: "ok" });
