@@ -24,6 +24,19 @@ app.add_middleware(
 agent = LangGraphAgent(name="graphwrapper", graph=graph)
 add_langgraph_fastapi_endpoint(app, agent, "/agent")
 
+@app.middleware("http")
+async def log_requests(request, call_next):
+    try:
+        print("[DBG] request", request.method, request.url.path)
+    except Exception:
+        pass
+    response = await call_next(request)
+    try:
+        print("[DBG] response", request.url.path, response.status_code)
+    except Exception:
+        pass
+    return response
+
 @app.post("/agent/human-feedback")
 async def human_feedback(payload: dict):
     thread_id = payload.get("threadId") or payload.get("thread_id")

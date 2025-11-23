@@ -178,3 +178,5 @@ checkpoints/
 *.key
 *.crt
 secrets/
+.next/
+node_modules/

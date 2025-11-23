@@ -92,6 +92,7 @@ def collect_spec(state: FactorAgentState):
         else:
             spec = ""
     name = state.get("factor_name") or "factor"
+    print(f"[DBG] collect_spec thread={state.get('thread_id')} spec_len={len(spec) if isinstance(spec, str) else 0} name={name}")
     update = {"user_spec": spec, "factor_name": name, "retries_left": state.get("retries_left", 5), "last_success_node": "collect_spec", "error": None, "route": "gen_code_react"}
     return Command(goto="gen_code_react", update=update)
 
@@ -103,9 +104,11 @@ def gen_code_react(state: FactorAgentState):
         name = state.get("factor_name") or "factor"
         body = simple_factor_body_from_spec(spec)
         code = render_factor_code(name, spec, body)
+        print(f"[DBG] gen_code_react thread={state.get('thread_id')} code_len={len(code) if isinstance(code, str) else 0}")
         action = CodeGenAction(factor_code=code)
         return Command(goto="dryrun", update={"factor_code": action.factor_code, "last_success_node": "gen_code_react", "error": None, "route": "dryrun"})
     except Exception as e:
+        print(f"[DBG] gen_code_react error thread={state.get('thread_id')} msg={str(e)}")
         return _route_retry_or_hitl(state, {"error": {"node": "gen_code_react", "message": str(e)}, "route": "gen_code_react"}, target_if_retry="gen_code_react")
 
 
@@ -113,6 +116,7 @@ def dryrun(state: FactorAgentState):
     """沙盒试运行 `run_factor` 入口，成功则进入语义检查，失败则走重试/HITL"""
     code = state.get("factor_code", "")
     result = run_code(code, entry="run_factor", args={"args": ["2020-01-01", "2020-01-10", ["A"]], "kwargs": {}})
+    print(f"[DBG] dryrun thread={state.get('thread_id')} success={result.get('success')} retries_left={state.get('retries_left')}")
     if result.get("success"):
         return Command(goto="semantic_check", update={"dryrun_result": {"success": True}, "last_success_node": "dryrun", "error": None, "route": "semantic_check"})
     return _route_retry_or_hitl(
@@ -128,6 +132,7 @@ def semantic_check(state: FactorAgentState):
     code = state.get("factor_code", "")
     ok = bool(spec) and bool(code) and bool(state.get("dryrun_result", {}).get("success"))
     result = SemanticCheckResult(ok=ok)
+    print(f"[DBG] semantic_check thread={state.get('thread_id')} ok={result.ok}")
     if result.ok:
         return Command(goto="human_review_gate", update={"semantic_check": {"pass": True}, "last_success_node": "semantic_check", "error": None, "route": "human_review_gate"})
     return _route_retry_or_hitl(state, {"semantic_check": {"pass": False}, "error": None, "route": "gen_code_react"}, target_if_retry="gen_code_react")
@@ -206,11 +211,14 @@ def human_review_gate(state: FactorAgentState):
             elif content in ("approved", "edited", "rejected"):
                 state["human_review_status"] = content
     status = state.get("human_review_status") or "pending"
+    print(f"[DBG] human_review_gate thread={state.get('thread_id')} status={status}")
     if status in ("approved", "edited"):
         code = state.get("human_edits") or state.get("factor_code")
         update = {"ui_request": None, "human_review_status": status, "factor_code": code, "last_success_node": "human_review_gate", "error": None, "route": "backfill_and_eval"}
+        print(f"[DBG] human_review_gate route=backfill_and_eval thread={state.get('thread_id')}")
         return Command(goto="backfill_and_eval", update=update)
     if status == "rejected":
+        print(f"[DBG] human_review_gate route=finish thread={state.get('thread_id')}")
         return Command(goto="finish", update={"ui_request": None, "human_review_status": status, "last_success_node": "human_review_gate", "error": None, "route": "finish"})
     req = {"type": "code_review", "code": state.get("factor_code", ""), "actions": ["approve", "edit", "reject"]}
     return {"ui_request": req, "should_interrupt": True, "route": "human_review_gate"}
@@ -222,6 +230,7 @@ def backfill_and_eval(state: FactorAgentState):
     to = mock_evals.factor_turnover_mock()
     gp = mock_evals.factor_group_perf_mock()
     metrics = {"ic": ic, "turnover": to, "group_perf": gp}
+    print(f"[DBG] backfill_and_eval thread={state.get('thread_id')} metrics_keys={list(metrics.keys())}")
     return Command(goto="write_db", update={"eval_metrics": metrics, "last_success_node": "backfill_and_eval", "error": None, "route": "write_db"})
 
 
@@ -230,10 +239,12 @@ def write_db(state: FactorAgentState):
     name = state.get("factor_name") or "factor"
     metrics = state.get("eval_metrics", {})
     res = mock_evals.write_factor_and_metrics_mock(name, metrics)
+    print(f"[DBG] write_db thread={state.get('thread_id')} status={res.get('status', 'unknown')}")
     return Command(goto="finish", update={"db_write_status": res.get("status", "success"), "last_success_node": "write_db", "error": None, "route": "finish"})
 
 
 def finish(state: FactorAgentState):
+    print(f"[DBG] finish thread={state.get('thread_id')}")
     return Command(goto=END, update={})
 """工作流节点实现（纯 Command 路由）
 

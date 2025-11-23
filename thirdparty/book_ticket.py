@@ -374,6 +374,25 @@ async def confirm_agent(state: State):
     return state
 
 def route_or_interrupt(state: State):
+    """
+    1) route_or_interrupt 到底是什么？add_conditional_edges为langgraph的条件分支
+    它不是一个 node，而是你传给 add_conditional_edges 的 router / condition function：
+
+    它的作用：
+    在某个节点执行完成后，根据 state 计算“下一跳的节点 key”。
+    返回值类型通常是：
+    某个节点名字（字符串，比如 "contact"）
+    或 LangGraph 的特殊标记 END.
+----------
+    graph_builder.add_conditional_edges(
+    "schedule",            # from_node
+    route_or_interrupt,    # condition/router
+    ["schedule", "contact", "interrupt_node"]  # allowed next nodes
+    )
+    可以理解成：
+    “schedule 节点跑完之后，调用 route_or_interrupt(state)。
+    route_or_interrupt 返回什么，就跳到哪个 next node（必须在 allowed list 里面）。”
+    """
     if state.get("should_interrupt", False):
         return "interrupt_node"
     route = state.get("route", "schedule")

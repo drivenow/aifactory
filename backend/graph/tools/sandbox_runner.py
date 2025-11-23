@@ -13,6 +13,7 @@ def run_code(code: str, entry: str = "run_factor", args: dict | None = None) -> 
     - {"success": True, "result": any} 或 {"success": False, "traceback": str}
     """
     try:
+        print("[DBG] sandbox_run entry", entry)
         g = {"__builtins__": {"range": range, "len": len}}
         l = {}
         exec(code, g, l)
@@ -22,12 +23,16 @@ def run_code(code: str, entry: str = "run_factor", args: dict | None = None) -> 
         if args and isinstance(args, dict):
             a = args.get("args") or []
             kw = args.get("kwargs") or {}
+            print("[DBG] sandbox_args", len(a), len(kw))
             res = fn(*a, **kw)
         else:
             res = fn("2020-01-01", "2020-01-10", ["A"]) 
+        print("[DBG] sandbox_success")
         return {"success": True, "result": res}
     except Exception:
-        return {"success": False, "traceback": traceback.format_exc()}
+        tb = traceback.format_exc()
+        print("[DBG] sandbox_error", tb.splitlines()[-1] if tb else "")
+        return {"success": False, "traceback": tb}
 """受限沙盒执行器
 
 用于在受控环境下执行模板生成的因子代码，捕获输出与异常，避免对系统造成破坏。
