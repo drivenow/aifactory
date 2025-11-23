@@ -5,28 +5,17 @@ FACTOR_TEMPLATE = """
 # Factor: {factor_name}
 # Description: {user_spec}
 
-try:
-    import pandas as pd
-    import numpy as np
-except Exception:
-    pd = None
-    np = None
+import pandas as pd
 
 def load_data(start, end, universe):
-    try:
-        if pd is not None:
-            return pd.DataFrame({{'close': [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]}})
-    except Exception:
-        pass
-    return {{'close': [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]}}
+    return pd.DataFrame({{'close': [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]}})
 
-def compute_factor(df):
+def compute_factor(df: pd.DataFrame) -> pd.Series:
 {factor_body}
 
 def run_factor(start, end, universe):
     df = load_data(start, end, universe)
-    fac = compute_factor(df)
-    return fac
+    return compute_factor(df)
 """
 
 
@@ -56,37 +45,19 @@ def simple_factor_body_from_spec(user_spec: str) -> str:
     if "moving average" in s or "ma" in s or "滚动均值" in s or "均值" in s:
         return (
             "    window = 5\n"
-            "    price = df['close'] if isinstance(df, dict) else df['close']\n"
-            "    try:\n"
-            "        return price.rolling(window).mean()\n"
-            "    except Exception:\n"
-            "        vals = list(price)\n"
-            "        res = []\n"
-            "        for i in range(len(vals)):\n"
-            "            if i + 1 < window:\n"
-            "                res.append(None)\n"
-            "            else:\n"
-            "                s = vals[i - window + 1:i + 1]\n"
-            "                res.append(sum(s) / float(window))\n"
-            "        return res\n"
+            "    price = df['close']\n"
+            "    return price.rolling(window).mean()\n"
         )
     if "momentum" in s or "动量" in s:
         return (
-            "    lookback = 5\n"
-            "    price = df['close'] if isinstance(df, dict) else df['close']\n"
-            "    try:\n"
+            "        lookback = 5\n"
+            "        price = df['close'] if isinstance(df, dict) else df['close']\n"
             "        return price.pct_change(lookback)\n"
-            "    except Exception:\n"
-            "        vals = list(price)\n"
-            "        res = [None] * len(vals)\n"
-            "        for i in range(lookback, len(vals)):\n"
-            "            prev = vals[i - lookback]\n"
-            "            res[i] = (vals[i] - prev) / prev if prev not in (0, None) else None\n"
-            "        return res\n"
         )
-    return "    raise NotImplementedError\n"
-"""因子模板与渲染工具
+    return "        raise NotImplementedError\n"
+"""
+因子模板与渲染工具
 
-该模块提供统一的因子代码模板 `FACTOR_TEMPLATE`，以及将因子名/描述/主体填入模板的渲染函数。
+该模块提供统一的因子代码模板 FACTOR_TEMPLATE，以及将因子名/描述/主体填入模板的渲染函数。
 同时提供一个基于用户描述的简易主体生成器（mock），用于 MVP 阶段的快速演示。
 """

@@ -1,29 +1,27 @@
 "use client";
-/*
-输入因子描述 → 后端走 collect_spec → gen_code_react → dryrun → semantic_check → human_review_gate。
-第一次到 human_review_gate 时触发中断，state.ui_request 带回前端 → CodeReviewPanel 打开。
-你在右边面板点 Approve/Edit/Reject → setState 写入 ui_response → run()。
-后端 human_review_gate 第二次执行，读到 ui_response，然后进入 backfill_and_eval → write_db → finish。
-前端 statusBadge 变为 done，MetricsPanel 里能看到 mock 的指标。
-*/
-import { CopilotKit, useCoAgent } from "@copilotkit/react-core";
+
+import {
+  CopilotKit,
+  useCoAgent,
+  useLangGraphInterrupt,
+} from "@copilotkit/react-core";
 import { CopilotChat } from "@copilotkit/react-ui";
+
 import StatusBadge from "../../components/StatusBadge";
 import TracePane from "../../components/TracePane";
-import CodeReviewPanel from "../../components/CodeReviewPanel";
+import CodeReviewPanel, {
+  CodeReviewRequest,
+} from "../../components/CodeReviewPanel";
 import MetricsPanel from "../../components/MetricsPanel";
 
+// 和后端 FactorAgentState 对齐一个前端类型，方便使用
 type FactorAgentState = {
   retry_count?: number;
-  human_review_status?: "pending" | "edited" | "approved" | "rejected";
-  ui_request?: any;
-  ui_response?: any;
-  route?: string;
+  human_review_status?: string;
+  eval_metrics?: any;
+  db_write_status?: string;
   last_success_node?: string;
-  db_write_status?: "success" | "failed" | "unknown";
-  events?: any[];
-  // 其他后端 state 字段按需补充
-  [key: string]: any;
+  route?: string;
 };
 
 export default function Page() {
@@ -35,25 +33,65 @@ export default function Page() {
 }
 
 function Inner() {
-  const { state, setState, run, running } = useCoAgent<FactorAgentState>({
+  // 1) 同步 LangGraph 自定义 State（非中断）
+  const { state, running, events } = useCoAgent<FactorAgentState>({
     name: "factor_agent",
     initialState: {
       retry_count: 0,
       human_review_status: "pending",
-      ui_request: null,
-      ui_response: null,
     },
   });
 
-  const events = state?.events ?? []; // 目前后端没提供就为空数组
   const status =
     running
       ? "running"
-      : state?.db_write_status === "failed"
-        ? "error"
-        : state?.route === "finish"
-          ? "done"
+      : state?.route === "finish"
+        ? "done"
+        : state?.db_write_status === "failed"
+          ? "error"
           : "idle";
+
+  // 2) 处理 LangGraph interrupt（HITL）
+  useLangGraphInterrupt<CodeReviewRequest>({
+    // 如果你以后有多 agent，可以在这里过滤 agent
+    enabled: ({ agentMetadata }) =>
+      !agentMetadata || agentMetadata.agentName === "factor_agent",
+
+    // render 决定这次 interrupt 在前端长成什么 UI
+    render: ({ event, resolve }) => {
+      const req = event.value as CodeReviewRequest;
+
+      if (!req || req.type !== "code_review") {
+        // 非我们关心的中断类型，直接忽略
+        return null;
+      }
+
+      return (
+        <CodeReviewPanel
+          request={req}
+          onApprove={() =>
+            resolve({
+              type: "code_review",
+              status: "approved",
+            })
+          }
+          onReject={() =>
+            resolve({
+              type: "code_review",
+              status: "rejected",
+            })
+          }
+          onEdit={(code) =>
+            resolve({
+              type: "code_review",
+              status: "edited",
+              edited_code: code,
+            })
+          }
+        />
+      );
+    },
+  });
 
   return (
     <div
@@ -64,23 +102,22 @@ function Inner() {
         padding: 16,
       }}
     >
-      {/* 左侧：聊天 + 状态 + Trace */}
+      {/* 左侧：对话 + 状态 + 事件流 */}
       <div>
-        <h1 style={{ fontSize: 24, marginBottom: 8 }}>量化因子</h1>
+        <h1>量化因子</h1>
         <CopilotChat
           instructions="你是量化因子编码助手"
           labels={{ title: "Factor Agent" }}
         />
         <StatusBadge status={status} />
-        <TracePane events={events} />
-        <pre style={{ marginTop: 12 }}>
+        <TracePane events={events || []} />
+        <pre>
           {JSON.stringify(
             {
               node: state?.last_success_node,
               retries: state?.retry_count,
               human: state?.human_review_status,
               route: state?.route,
-              db_write_status: state?.db_write_status,
             },
             null,
             2
@@ -88,43 +125,8 @@ function Inner() {
         </pre>
       </div>
 
-      {/* 右侧：人审面板 + 指标面板 */}
+      {/* 右侧：指标面板（从共享 state 里拿 eval_metrics） */}
       <div>
-        <CodeReviewPanel
-          state={state || {}}
-          onApprove={async () => {
-            // 人审通过：写入 ui_response -> run() 让后端 human_review_gate 继续
-            await setState((prev) => ({
-              ...(prev || {}),
-              ui_response: {
-                type: "code_review",
-                status: "approved",
-              },
-            }));
-            await run();
-          }}
-          onReject={async () => {
-            await setState((prev) => ({
-              ...(prev || {}),
-              ui_response: {
-                type: "code_review",
-                status: "rejected",
-              },
-            }));
-            await run();
-          }}
-          onEdit={async (code) => {
-            await setState((prev) => ({
-              ...(prev || {}),
-              ui_response: {
-                type: "code_review",
-                status: "edited",
-                edited_code: code || "",
-              },
-            }));
-            await run();
-          }}
-        />
         <MetricsPanel state={state || {}} />
       </div>
     </div>

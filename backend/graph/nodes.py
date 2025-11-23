@@ -265,15 +265,21 @@ def semantic_check(state: FactorAgentState) -> Command:
         },
         target_if_retry="gen_code_react",
     )
+
 def human_review_gate(state: FactorAgentState) -> Command:
     """
-    HITL 节点（LangGraph 1.0 风格）
+    LangGraph 1.0 风格的 HITL 节点（使用 interrupt）
 
-    - 第一次执行到这里：调用 interrupt(req) → 图暂停，返回给前端一个中断事件
-    - 前端在人审 UI 里点 approve/edit/reject 后，通过 ag-ui 回传 ui_response
-    - 第二次执行到这里：interrupt(req) 会直接返回这次 ui_response，继续走后续逻辑
+    - 第一次运行到这里：
+        * 构造 req（人审请求 payload）
+        * 调用 interrupt(req) → 图暂停，req 通过 AG-UI 事件流返回给前端
+        * 注意：此时不会执行到下面解析 ui_resp 的代码
+    - 前端调用 resolve(...) 回复后：
+        * 再次运行到这里，interrupt(req) 返回 ui_resp
+        * 这里对 ui_resp 做 JSON 解析 & 类型兜底，然后路由下一步
     """
 
+    # 1) 构造人审请求 payload
     req = {
         "type": "code_review",
         "title": "Review generated factor code",
@@ -282,27 +288,40 @@ def human_review_gate(state: FactorAgentState) -> Command:
         "retry_count": int(state.get("retry_count", 0)),
     }
 
-    # 在 state 里也记一份，方便前端直接从 agentState 读取
-    # 第一次跑到这里时，下面这句不会被真正“执行完”，因为 interrupt 会先中断返回
+    # 2) 中断：第一次会直接“抛出中断”，恢复时才会返回 ui_resp
     ui_resp = interrupt(req)
 
-    # 只有“恢复运行”的时候，才会执行到下面这些代码
+    # 3) 恢复时才会执行到这里：先把原始值打一下 log
     print(
         f"[DBG] human_review_gate resume thread={state.get('thread_id')} "
-        f"resp={ui_resp}"
+        f"resp_raw={ui_resp!r} type={type(ui_resp)}"
     )
+
+    # 4) AG-UI / HTTP 通道会把对象序列化成 JSON 字符串，这里做一层健壮解析
+    if isinstance(ui_resp, str):
+        try:
+            ui_resp = json.loads(ui_resp)
+        except Exception:
+            # 万一不是合法 JSON，就当成一个简单 status 字段
+            ui_resp = {"status": ui_resp}
+
+    # 再兜底一次：确保是 dict，避免后面 .get 报错
+    if not isinstance(ui_resp, dict):
+        ui_resp = {}
 
     status = ui_resp.get("status") or ui_resp.get("human_review_status")
     edited_code = ui_resp.get("edited_code") or ui_resp.get("factor_code")
 
+    # 5) 根据人审结果路由
+
+    # 5.1 审核通过 / 编辑后通过 → 进入回填+评价
     if status in ("approved", "edited"):
         final_code = edited_code or state.get("factor_code")
-
         return Command(
             goto="backfill_and_eval",
             update={
-                "ui_request": req,              # 方便前端展示上下文
-                "ui_response": ui_resp,         # 记录人审结果
+                "ui_request": req,
+                "ui_response": ui_resp,
                 "human_review_status": status,
                 "human_edits": edited_code,
                 "factor_code": final_code,
@@ -312,6 +331,7 @@ def human_review_gate(state: FactorAgentState) -> Command:
             },
         )
 
+    # 5.2 审核直接拒绝 → 直接结束
     if status == "rejected":
         return Command(
             goto="finish",
@@ -325,7 +345,7 @@ def human_review_gate(state: FactorAgentState) -> Command:
             },
         )
 
-    # 万一前端传了个奇怪的 status，当 reject 处理
+    # 5.3 兜底：status 异常，也当 reject 处理
     return Command(
         goto="finish",
         update={
