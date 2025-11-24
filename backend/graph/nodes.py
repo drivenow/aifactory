@@ -297,19 +297,24 @@ def human_review_gate(state: FactorAgentState) -> Command:
         f"resp_raw={ui_resp!r} type={type(ui_resp)}"
     )
 
-    # 4) AG-UI / HTTP 通道会把对象序列化成 JSON 字符串，这里做一层健壮解析
+   # 1) 字符串 → 尝试当 JSON 解析
     if isinstance(ui_resp, str):
         try:
             ui_resp = json.loads(ui_resp)
         except Exception:
-            # 万一不是合法 JSON，就当成一个简单 status 字段
             ui_resp = {"status": ui_resp}
 
-    # 再兜底一次：确保是 dict，避免后面 .get 报错
+    # 2) 再兜底一次：必须是 dict
     if not isinstance(ui_resp, dict):
-        ui_resp = {}
+        ui_resp = {"status": str(ui_resp)}
 
-    status = ui_resp.get("status") or ui_resp.get("human_review_status")
+    # 3) 把“嵌套的 status”解开：
+    status_raw = ui_resp.get("status") or ui_resp.get("human_review_status")
+    if isinstance(status_raw, dict):
+        status = status_raw.get("status") or status_raw.get("human_review_status")
+    else:
+        status = status_raw
+
     edited_code = ui_resp.get("edited_code") or ui_resp.get("factor_code")
 
     # 5) 根据人审结果路由

@@ -1,9 +1,10 @@
 import sys
+sys.path.append("/Users/fullmetal/Documents/agent_demo/")
 import os
 from backend.graph.graph import graph
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from ag_ui_langgraph import add_langgraph_fastapi_endpoint, LangGraphAgent
+from ag_ui_langgraph import add_langgraph_fastapi_endpoint, LangGraphAgent as BaseLangGraphAgent
 import os
 import uvicorn
 
@@ -17,7 +18,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-agent = LangGraphAgent(name="factor_agent", graph=graph)
+# ✅ 自己包一层，关闭 schema 过滤
+class FullStateLangGraphAgent(BaseLangGraphAgent):
+    def get_state_snapshot(self, state):
+        # 直接把 LangGraph 的 state 原样透给前端，不做字段过滤
+        return state
+
+agent = FullStateLangGraphAgent(name="factor_agent", graph=graph)
 add_langgraph_fastapi_endpoint(app, agent, "/agent")
 
 @app.middleware("http")
