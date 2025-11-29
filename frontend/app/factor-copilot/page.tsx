@@ -14,7 +14,18 @@ import CodeReviewPanel, {
 } from "../../components/CodeReviewPanel";
 import MetricsPanel from "../../components/MetricsPanel";
 
-// 和后端 FactorAgentState 对齐一个前端类型，方便使用
+/**
+ * 和后端 FactorAgentState 对齐一个前端类型，方便使用
+ * 它只是“前端的 TS 类型声明”，而不是另一份独立的状态源。
+
+好处是：
+
+state?.route、state?.retry_count 有完整类型提示；
+
+MetricsPanel / StatusBadge 这些组件也都能按这个类型来写 props。
+
+这份类型只存在于前端编译期，不会制造一份“新状态”
+ */
 type FactorAgentState = {
   retry_count?: number;
   human_review_status?: string;
