@@ -124,6 +124,7 @@ class FactorAgentState(
 
     user_spec: str                      # 因子自然语言描述
     factor_name: Optional[str]          # 因子名称/标识
+    code_mode: Optional[str]            # 代码生成模式：pandas / l3_py
 
     """CodeGenState 代码生成阶段产物"""
 
@@ -177,6 +178,7 @@ class FactorAgentStateModel(BaseModel):
     # LogicState
     user_spec: str = ""                      # 默认为空字符串
     factor_name: Optional[str] = "factor"    # 默认因子名
+    code_mode: Optional[str] = "pandas"
 
     # CodeGenState
     factor_code: Optional[str] = None

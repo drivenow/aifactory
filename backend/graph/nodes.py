@@ -79,6 +79,7 @@ def collect_spec_from_messages(state: FactorAgentState) -> Dict[str, Any]:
         "user_spec": spec,
         "factor_name": name,
         "retry_count": int(state.get("retry_count", 0)),
+        "code_mode": state.get("code_mode") or "pandas",
         "last_success_node": "collect_spec_from_messages",
         "error": None,
         "route": "gen_code_react",
@@ -118,6 +119,7 @@ def gen_code_react(state: FactorAgentState) -> Dict[str, Any]:
 def dryrun(state: FactorAgentState) -> Dict[str, Any]:
     result = run_factor_dryrun(state)
     success = bool(result.get("success"))
+    trace = result.get("traceback")
 
     print(
         f"[DBG] dryrun thread={state.get('thread_id')} "
@@ -127,6 +129,7 @@ def dryrun(state: FactorAgentState) -> Dict[str, Any]:
     if success:
         return {
             "dryrun_result": {"success": True, "stdout": result.get("stdout", "")},
+            "semantic_check": {"last_error": None},
             "last_success_node": "dryrun",
             "error": None,
             "route": "semantic_check",
@@ -139,6 +142,10 @@ def dryrun(state: FactorAgentState) -> Dict[str, Any]:
                 "success": False,
                 "traceback": result.get("traceback"),
                 "stderr": result.get("stderr", ""),
+            },
+            "semantic_check": {
+                "pass": False,
+                "last_error": trace,
             },
             "error": {"node": "dryrun", "message": "dryrun failed"},
             "last_success_node": "dryrun",
@@ -154,14 +161,15 @@ def semantic_check(state: FactorAgentState) -> Dict[str, Any]:
 
     if check_result:    
         return {
-            "semantic_check": {"pass": True},
+            "semantic_check": check_detail or {"pass": True},
             "last_success_node": "semantic_check",
             "error": None,
             "route": "human_review_gate",
         }
 
     update = {
-        "semantic_check": {
+        "semantic_check": check_detail
+        or {
             "pass": False,
             "reason": "spec/code/dryrun mismatch",
         },
