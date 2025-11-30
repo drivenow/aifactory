@@ -13,47 +13,131 @@
   - 继续传入 Command(resume=...) 进行恢复
 """
 
-from __future__ import annotations
-
 import json
 import uuid
+from typing import Any, Callable, Dict, Optional
 
 from langgraph.errors import GraphInterrupt
 from langgraph.types import Command
-
-from .graph import graph
-from .state import FactorAgentState
-from .domain.review import build_human_review_request, normalize_review_response
+from backend.graph.graph import graph
+from backend.graph.state import FactorAgentState
 
 
-
-def _input_resume_value() -> object:
+def _unwrap_interrupt(payload: Any) -> Any:
     """
-    从命令行读取一个 resume 值：
-    - 空行      → True
-    - JSON 文本 → json.loads
-    - 其他文本   → 原样字符串
+    统一解包 interrupt payload，兼容几种情况：
+
+    - 单个 Interrupt 实例
+    - list[Interrupt]
+    - 已经是 dict / str / 其他可序列化对象
     """
+    # 单个 Interrupt
+    if hasattr(payload, "value"):
+        return payload.value
+
+    # list/tuple 里是 Interrupt
+    if isinstance(payload, (list, tuple)):
+        out = []
+        for p in payload:
+            if hasattr(p, "value"):
+                out.append(p.value)
+            else:
+                out.append(p)
+        # 一般只会有一个，这里返回第一个方便使用
+        return out[0] if len(out) == 1 else out
+
+    # 其他情况（dict/str/number...）
+    return payload
+
+
+def _default_prompt_resume(payload: Any) -> Any:
+    """
+    默认的 resume 输入方式：
+    - 回车        → True
+    - JSON 文本   → json.loads
+    - 普通字符串   → 原样字符串
+    """
+    print("\n⏸️  Graph interrupted. Payload:")
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+
     s = input("\n请输入 resume 值（回车=True；JSON 自动解析）：\n> ").strip()
+
     if s == "":
         return True
+
     try:
         return json.loads(s)
     except json.JSONDecodeError:
         return s
 
 
-def cli_debug() -> None:
-    """在命令行中交互式运行 FactorAgent graph。"""
-    # 1) 读入用户的因子自然语言描述
-    print("请输入因子的自然语言描述（例如：\"动量因子，lookback 20 天\"）：")
+def cli_debug_loop(
+    graph,
+    init_input: Any,
+    *,
+    thread_id: Optional[str] = None,
+    base_config: Optional[Dict[str, Any]] = None,
+    prompt_resume: Callable[[Any], Any] = _default_prompt_resume,
+) -> Dict[str, Any]:
+    """
+    通用 CLI 调试主循环：
+
+    - 支持 GraphInterrupt 异常风格
+    - 也支持结果 dict["__interrupt__"] 风格
+    - 每次遇到 interrupt，就调用 prompt_resume(prompt_payload) 拿一个 resume 值，
+      然后用 Command(resume=...) 继续同一个 thread
+
+    参数：
+        graph:        已 compile 的 LangGraph 图（例如 backend.graph.graph.graph）
+        init_input:   初始输入，可以是 state dict 或 Command(...)
+        thread_id:    可选，未提供时会自动生成一个 cli-UUID
+        base_config:  传给 graph.invoke 的 config（可带其他 configurable 字段）
+        prompt_resume: 一个函数 (payload) -> resume_val，方便以后自定义 UI
+
+    返回：
+        最终一次 graph.invoke 的返回结果（通常是完整 state dict）
+    """
+    # 1) thread_id & config 统一处理
+    if thread_id is None:
+        thread_id = f"cli-{uuid.uuid4()}"
+
+    config = dict(base_config or {})
+    configurable = dict(config.get("configurable") or {})
+    configurable.setdefault("thread_id", thread_id)
+    config["configurable"] = configurable
+
+    print(f"[CLI] 使用 thread_id = {thread_id}\n")
+
+    current_input: Any = init_input
+
+    # 2) 主循环：不断调用 graph.invoke，直到没有 __interrupt__
+    while True:
+        try:
+            result = graph.invoke(current_input, config=config)
+        except GraphInterrupt as gi:
+            # 兼容“抛异常”的风格：统一转成带 __interrupt__ 的结果
+            result = {"__interrupt__": gi.value}
+
+        # 看看这次调用有没有中断 payload
+        raw = result.get("__interrupt__")
+        if not raw:
+            # 没有 __interrupt__ → 图已经正常结束
+            print("\n✅ Graph finished. 最终状态：")
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return result  # 直接返回
+
+        # 有中断 → 解包 payload，交给 prompt_resume 决定下一步
+        payload = _unwrap_interrupt(raw)
+        resume_val = prompt_resume(payload)
+
+        # 下一轮以 Command(resume=...) 继续同一个 thread
+        current_input = Command(resume=resume_val)
+
+
+def main():
+    print("请输入因子的自然语言描述（例如：动量因子，lookback 20 天）：")
     spec = input("> ").strip()
 
-    # 2) 为本次 CLI 会话创建一个独立的 thread_id
-    thread_id = f"cli-{uuid.uuid4()}"
-    config = {"configurable": {"thread_id": thread_id}}
-
-    # 3) 初始 state：直接写入 user_spec，其他字段留空
     init_state: FactorAgentState = {
         "user_spec": spec,
         "retry_count": 0,
@@ -61,32 +145,8 @@ def cli_debug() -> None:
         "route": "collect_spec",
     }
 
-    current_input: object = init_state
-
-    print(f"\n[CLI] 使用 thread_id = {thread_id}\n")
-
-    while True:
-        try:
-            # 调用图：若中间无 interrupt，直接跑到 finish
-            result = graph.invoke(current_input, config=config)
-            print("\n✅ Graph finished. 最终状态：")
-            ui_resp, status, edited_code = normalize_review_response(result)
-            print(ui_resp, status, edited_code)
-            # print(json.dumps(result, ensure_ascii=False, indent=2))
-            break
-        except GraphInterrupt as gi:
-            # 发生中断：打印 payload，等待用户输入 resume
-            payload = gi.value
-            print("\n⏸️  Graph interrupted. Payload:")
-            ui_resp, status, edited_code = normalize_review_response(payload)
-            print(ui_resp, status, edited_code)
-            # print(json.dumps(payload, ensure_ascii=False, indent=2))
-
-            resume_val = _input_resume_value()
-
-            # 下一轮用 Command(resume=...) 继续同一个 thread
-            current_input = Command(resume=resume_val)
-
+    cli_debug_loop(graph, init_state)
 
 if __name__ == "__main__":
-    cli_debug()
+    main()
+
