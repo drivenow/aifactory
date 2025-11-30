@@ -15,7 +15,7 @@ class HumanReviewView(ViewBase):
     retry_count: int = 0
     ui_request: Optional[Dict[str, Any]]      # 后端发起的人审请求 payload
     ui_response: Optional[Dict[str, Any]]     # 前端回传的人审结果 payload
-    human_review_status: HumanReviewStatus    # 人审状态：pending/edited/approved/rejected
+    human_review_status: Optional[HumanReviewStatus]    # 人审状态：pending/edited/approved/rejected
     human_edits: Optional[str]                # 人工修改后的代码
     should_interrupt: bool = True   # 是否进入 HITL 中断（诊断/前端显示）
 

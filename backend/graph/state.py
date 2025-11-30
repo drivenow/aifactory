@@ -16,7 +16,7 @@ DBWriteStatus = Literal["success", "failed", "unknown"]
 
 # route 用于前端进度展示 + 节点间可视化
 Route = Literal[
-    "collect_spec",
+    "collect_spec_from_messages",
     "gen_code_react",
     "dryrun",
     "semantic_check",
@@ -30,7 +30,7 @@ def wrap_state_error(
     where: str,
     state_arg: str = "state",
     thread_id_key: str = "thread_id",
-    dbg_prefix: str = "[DBG]",
+    dbg_prefix: str = "[DBG_VIEW]",
 ):
     """
     where: 报错来源标识，比如 "LogicView.from_state"
@@ -106,7 +106,7 @@ class FactorAgentState(
 
     """ConversationState 对话/轨迹相关的元信息（由 LangGraph / CopilotKit 自动注入）"""
 
-    messages: List[Dict[str, Any]]      # 对话/轨迹消息滑窗
+    messages: List[Any]      # 对话/轨迹消息滑窗
     short_summary: Optional[str]        # 对话短摘要（跨阶段上下文稳定）
     system_date: Optional[str]          # 系统日期（可用于提示词/审计）
     run_id: Optional[str]               # 本次调用 ID
@@ -127,7 +127,7 @@ class FactorAgentState(
 
     ui_request: Optional[Dict[str, Any]]      # 后端发起的人审请求 payload
     ui_response: Optional[Dict[str, Any]]     # 前端回传的人审结果 payload
-    human_review_status: HumanReviewStatus    # 人审状态：pending/edited/approved/rejected
+    human_review_status: Optional[HumanReviewStatus] = "pending"    # 人审状态：pending/edited/approved/rejected
     human_edits: Optional[str]                # 人工修改后的代码
     should_interrupt: bool = True   # 是否进入 HITL 中断（诊断/前端显示）
 
@@ -153,7 +153,7 @@ class FactorAgentStateModel(BaseModel):
     """
 
     # ConversationState
-    messages: List[Dict[str, Any]] = Field(default_factory=list)
+    messages: List[Any] = Field(default_factory=list)
     short_summary: Optional[str] = None
     system_date: Optional[str] = None
     run_id: Optional[str] = None
@@ -180,16 +180,14 @@ class FactorAgentStateModel(BaseModel):
     # HumanReviewState
     ui_request: Dict[str, Any] = Field(default_factory=dict)
     ui_response: Dict[str, Any] = Field(default_factory=dict)
-    human_review_status: HumanReviewStatus = "pending"
+    human_review_status: Optional[HumanReviewStatus] = "pending"
     human_edits: Optional[str] = None
     should_interrupt: bool = True
 
     # EvalState
     backfill_job_id: Optional[str] = None
     eval_metrics: Dict[str, Any] = Field(default_factory=dict)
-    db_write_status: DBWriteStatus = "unknown"
-
-
+    db_write_status: Optional[DBWriteStatus] = "unknown"
 
     class Config:
         # 如果你希望 state 里偶尔多塞调试字段，又不想报错，可以打开这一行

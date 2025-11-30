@@ -142,7 +142,7 @@ def main():
         "user_spec": spec,
         "retry_count": 0,
         "human_review_status": "pending",
-        "route": "collect_spec",
+        "route": "collect_spec_from_messages",
     }
 
     cli_debug_loop(graph, init_state)

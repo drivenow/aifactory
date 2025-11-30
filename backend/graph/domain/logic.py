@@ -14,7 +14,7 @@ class LogicView(ViewBase):
     - user_spec: 用户因子描述，默认空串
     - factor_name: 因子名，默认 "factor"
     """
-    messages: List[Dict[str, Any]] = Field(default_factory=list)
+    messages: List[Any] = Field(default_factory=list)
     user_spec: str = ""
     factor_name: str = "factor"
 

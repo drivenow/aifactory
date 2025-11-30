@@ -15,7 +15,7 @@ from .domain.codegen import (
 from .domain.eval import compute_eval_metrics, write_factor_and_metrics
 from .domain.review import build_human_review_request, normalize_review_response
 
-RETRY_MAX = 5
+RETRY_MAX = 3
 # -------------------------
 # Retry routing helper
 # -------------------------
@@ -24,44 +24,44 @@ def _route_retry_or_hitl(
     state: FactorAgentState,
     update: Dict[str, Any],
     target_if_retry: str = "gen_code_react",
-) -> Command:
+) -> Dict[str, Any]:
+    """
+    根据 retry_count 路由到重试节点或 HITL 节点。
+
+    - 如果 retry_count >= RETRY_MAX，进入 HITL 节点（默认 "human_review_gate"）
+    - 否则，进入重试节点（默认 "gen_code_react"）
+    """
     rc = int(state.get("retry_count", 0)) + 1
 
     base_update = {**update, "retry_count": rc}
 
     if rc >= RETRY_MAX:
-        return Command(
-            goto="human_review_gate",
-            update={
-                **base_update,
-                "should_interrupt": True,
-                "route": "human_review_gate",
-            },
-        )
+        return {
+            **base_update,
+            "should_interrupt": True,
+            "route": "human_review_gate",
+        }
 
-    return Command(
-        goto=target_if_retry,
-        update={**base_update, "route": target_if_retry},
-    )
+    return {
+        **base_update,
+        "route": target_if_retry,
+    }
 
 
 # -------------------------
 # Nodes
 # -------------------------
 
-def collect_spec(state: FactorAgentState) -> Dict[str, Any] | Command:
+def collect_spec_from_messages(state: FactorAgentState) -> Dict[str, Any]:
     """
     收集用户因子描述与名称，并进入代码生成阶段。
-
+    state: 实际传递的是一个dict
     - 从 state.user_spec 或 messages[-1] 中提取描述
-    - 因子名默认为 "factor"
     """
-    print(state)
-    # raise Exception()
     spec, name = extract_spec_and_name(state)
 
     print(
-        f"[DBG] collect_spec thread={state.get('thread_id')} "
+        f"[DBG] collect_spec_from_messages thread={state.get('thread_id')} "
         f"spec_len={len(spec) if isinstance(spec, str) else 0} name={name}"
     )
 
@@ -69,13 +69,13 @@ def collect_spec(state: FactorAgentState) -> Dict[str, Any] | Command:
         "user_spec": spec,
         "factor_name": name,
         "retry_count": int(state.get("retry_count", 0)),
-        "last_success_node": "collect_spec",
+        "last_success_node": "collect_spec_from_messages",
         "error": None,
         "route": "gen_code_react",
     }
 
 
-def gen_code_react(state: FactorAgentState) -> Dict[str, Any] | Command:
+def gen_code_react(state: FactorAgentState) -> Dict[str, Any]:
     try:
         code = generate_factor_code_from_spec(state)
 
@@ -105,7 +105,7 @@ def gen_code_react(state: FactorAgentState) -> Dict[str, Any] | Command:
         )
 
 
-def dryrun(state: FactorAgentState) -> Dict[str, Any] | Command:
+def dryrun(state: FactorAgentState) -> Dict[str, Any]:
     result = run_factor_dryrun(state)
     success = bool(result.get("success"))
 
@@ -137,7 +137,7 @@ def dryrun(state: FactorAgentState) -> Dict[str, Any] | Command:
     )
 
 
-def semantic_check(state: FactorAgentState) -> Dict[str, Any] | Command:
+def semantic_check(state: FactorAgentState) -> Dict[str, Any]:
     check_result, check_detail = is_semantic_check_ok(state)
 
     print(f"[DBG] semantic_check thread={state.get('thread_id')} ok={check_result} detail={check_detail}")
@@ -150,21 +150,20 @@ def semantic_check(state: FactorAgentState) -> Dict[str, Any] | Command:
             "route": "human_review_gate",
         }
 
-    return _route_retry_or_hitl(
-        state,
-        {
-            "semantic_check": {
-                "pass": False,
-                "reason": "spec/code/dryrun mismatch",
-            },
-            "error": {
-                "node": "semantic_check",
-                "message": "semantic_check failed",
-            },
-            "last_success_node": "semantic_check",
+    update = {
+        "semantic_check": {
+            "pass": False,
+            "reason": "spec/code/dryrun mismatch",
         },
-        target_if_retry="gen_code_react",
-    )
+        "error": {
+            "node": "semantic_check",
+            "message": "semantic_check failed",
+        },
+        "last_success_node": "semantic_check",
+    }
+    update2 = _route_retry_or_hitl(state, update, target_if_retry="gen_code_react")
+    print("[DBG] semantic_check fail update=", update2)
+    return update2
 
 
 def human_review_gate(state: FactorAgentState) -> Command:
@@ -244,7 +243,7 @@ def human_review_gate(state: FactorAgentState) -> Command:
     )
 
 
-def backfill_and_eval(state: FactorAgentState) -> Dict[str, Any] | Command:
+def backfill_and_eval(state: FactorAgentState) -> Dict[str, Any] :
     # 这里可以选择性全量校验一次（高价值节点）
     FactorAgentStateModel.from_state(state)
 
@@ -262,7 +261,7 @@ def backfill_and_eval(state: FactorAgentState) -> Dict[str, Any] | Command:
     }
 
 
-def write_db(state: FactorAgentState) -> Dict[str, Any] | Command:
+def write_db(state: FactorAgentState) -> Dict[str, Any] :
     res = write_factor_and_metrics(state)
 
     print(
@@ -287,7 +286,7 @@ def finish(state: FactorAgentState) -> Dict[str, Any] | Command:
 工作流节点实现（纯 Command 路由，方案 A）
 
 节点：
-- collect_spec: 收集用户描述
+- collect_spec_from_messages: 收集用户描述
 - gen_code_react: 按模板生成代码
 - dryrun: 沙盒运行
 - semantic_check: 语义检查

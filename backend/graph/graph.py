@@ -12,7 +12,7 @@ def build_graph() -> StateGraph:
     """
     构建工作流图（纯 Command 路由 + HITL interrupt）
 
-    入口：collect_spec
+    入口：collect_spec_from_messages
     路由：所有中间跳转由各节点返回 Command(goto=..., update=...) 控制
     终点：finish → END（显式加边，便于可视化与稳定性）
 
@@ -24,7 +24,7 @@ def build_graph() -> StateGraph:
     g = StateGraph(FactorAgentState)
 
     # 主流程节点
-    g.add_node("collect_spec", nodes.collect_spec)
+    g.add_node("collect_spec_from_messages", nodes.collect_spec_from_messages)
     g.add_node("gen_code_react", nodes.gen_code_react)
     g.add_node("dryrun", nodes.dryrun)
     g.add_node("semantic_check", nodes.semantic_check)
@@ -44,7 +44,7 @@ def build_graph() -> StateGraph:
 
     以下用静态边 （线性、无分支）：
 
-    collect_spec / backfill_and_eval / write_db / finish
+    collect_spec_from_messages / backfill_and_eval / write_db / finish
     主干最好静态边，异常/重试用 Command 。
     gen_code_react / dryrun / semantic_check
 
@@ -52,12 +52,36 @@ def build_graph() -> StateGraph:
     human_review_gate
 
     """
-    g.set_entry_point("collect_spec")
-    g.add_edge("collect_spec", "gen_code_react")
-    g.add_edge("gen_code_react", "dryrun")
-    g.add_edge("dryrun", "semantic_check")
-    g.add_edge("semantic_check", "human_review_gate")
-    g.add_edge("human_review_gate", "backfill_and_eval")
+    g.set_entry_point("collect_spec_from_messages")
+    g.add_edge("collect_spec_from_messages", "gen_code_react")
+
+    def route_from_state(state: dict):
+        route = state.get("route")
+        if route == "END":
+            return END
+        return route
+
+    g.add_conditional_edges(
+        "gen_code_react",
+        route_from_state,
+        ["dryrun", "gen_code_react", "human_review_gate"],
+    )
+    g.add_conditional_edges(
+        "dryrun",
+        route_from_state,
+        ["semantic_check", "gen_code_react", "human_review_gate"],
+    )
+    g.add_conditional_edges(
+        "semantic_check",
+        route_from_state,
+        ["human_review_gate", "gen_code_react"],
+    )
+    g.add_conditional_edges(
+        "human_review_gate",
+        route_from_state,
+        ["backfill_and_eval", "finish"],
+    )
+
     g.add_edge("backfill_and_eval", "write_db")
     g.add_edge("write_db", "finish")
     g.add_edge("finish", END)
