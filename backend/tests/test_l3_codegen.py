@@ -34,7 +34,7 @@ def test_l3_codegen_and_dryrun(monkeypatch):
     # stub out llm + agent builder
     monkeypatch.setattr(code_gen, "_L3_AGENT", None)
     monkeypatch.setattr(code_gen, "get_llm", lambda: "llm")
-    monkeypatch.setattr(code_gen, "create_react_agent", lambda llm, tools=None: dummy_agent)
+    monkeypatch.setattr(code_gen, "create_agent", lambda llm, tools=None: dummy_agent)
 
     state = {
         "user_spec": "最近3笔买卖盘价量比对比",

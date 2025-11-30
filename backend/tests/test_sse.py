@@ -1,9 +1,16 @@
+import sys
+import pathlib
 import pytest
 from fastapi.testclient import TestClient
-from backend.app import app
 import json as _json
 import datetime as dt
 from typing import Any, Dict, List, Optional, Tuple
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from backend.app import app
 
 def make_min_payload(
     thread_id: str = "t-demo-001",
@@ -12,6 +19,7 @@ def make_min_payload(
     msg_id: str = "msg-001",
     user_id: str = "u-demo-001",
     state: Optional[dict] = None,
+    should_interrupt: bool = False,
 ):
     payload = {
         "threadId": thread_id,

@@ -20,3 +20,12 @@ def get_llm(model_name = "Pro/deepseek-ai/DeepSeek-R1"):
     if base_url:
         return ChatOpenAI(model=model, api_key=api_key, base_url=base_url)
     return ChatOpenAI(model=model, api_key=api_key)
+
+# 写一个调用大模型的小demo
+if __name__ == "__main__":
+    llm = get_llm()
+    if llm:
+        response = llm.invoke("你好")
+        print(response.content)
+    else:
+        print("LLM 配置错误")

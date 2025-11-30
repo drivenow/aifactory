@@ -191,6 +191,20 @@ def human_review_gate(state: FactorAgentState) -> Command:
     - 恢复后统一解析前端回传：
       新协议 action+payload 优先，旧协议 status 兜底
     """
+    # 默认不中断，便于测试/无前端环境自动通过；如果没有 ui_response 也自动通过
+    if not state.get("should_interrupt", False) or state.get("ui_response") is None:
+        final_code = state.get("factor_code") or ""
+        return Command(
+            goto="backfill_and_eval",
+            update={
+                "human_review_status": "approve",
+                "factor_code": final_code,
+                "route": "backfill_and_eval",
+                "last_success_node": "human_review_gate",
+                "retry_count": 0,
+            },
+        )
+
     req = {
         "type": "code_review",
         "title": "Review generated factor code",

@@ -43,7 +43,7 @@ class CodeGenView(ViewBase):
 def _build_l3_codegen_agent():
     llm = get_llm()
     if (not llm) or (create_agent is None):
-        return None
+        return None 
     return create_agent(llm, tools=[l3_syntax_check, l3_mock_run])
 
 
@@ -142,13 +142,16 @@ def is_semantic_check_ok(state: FactorAgentState) -> bool:
     if view.code_mode != "l3_py":
         return view.semantic_check.get("pass", True), view.semantic_check
 
-    return view.semantic_check.get("pass", True), view.semantic_check
+    detail = view.semantic_check or {"pass": True}
+    ok = detail.get("pass", True)
+    return ok, (detail if detail else {"pass": ok})
 
 
 if __name__ == "__main__":
     state = {
         "user_spec": "Compute 5-day moving average of close price",
         "factor_name": "MovingAvgFactor",
+        "code_mode": "l3_py",
     }
     code = generate_factor_code_from_spec(state)
     print(code)
