@@ -55,7 +55,7 @@ def human_review_gate(state: FactorAgentState) -> Command:
     )
 
     # --- 审核通过 / 编辑后通过 → 进入回填+评价 ---
-    if status in ("approved", "edited"):
+    if status in ("approve", "edit"):
         final_code = edited_code or state.get("factor_code")
         return Command(
             goto="backfill_and_eval",
@@ -73,13 +73,13 @@ def human_review_gate(state: FactorAgentState) -> Command:
         )
 
     # --- 审核直接拒绝 → 直接结束 ---
-    if status == "rejected":
+    if status == "rejecte":
         return Command(
             goto="finish",
             update={
                 "ui_request": req,
                 "ui_response": ui_resp,
-                "human_review_status": "rejected",
+                "human_review_status": "rejecte",
                 "last_success_node": "human_review_gate",
                 "error": None,
                 "route": "finish",
@@ -93,7 +93,7 @@ def human_review_gate(state: FactorAgentState) -> Command:
         update={
             "ui_request": req,
             "ui_response": ui_resp,
-            "human_review_status": "rejected",
+            "human_review_status": "rejecte",
             "last_success_node": "human_review_gate",
             "error": {
                 "node": "human_review_gate",

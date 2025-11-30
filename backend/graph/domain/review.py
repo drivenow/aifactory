@@ -15,7 +15,7 @@ class HumanReviewView(ViewBase):
     retry_count: int = 0
     ui_request: Optional[Dict[str, Any]]      # 后端发起的人审请求 payload
     ui_response: Optional[Dict[str, Any]]     # 前端回传的人审结果 payload
-    human_review_status: Optional[HumanReviewStatus]    # 人审状态：pending/edited/approved/rejected
+    human_review_status: Optional[HumanReviewStatus]    # 人审状态：pending/edit/approve/rejecte
     human_edits: Optional[str]                # 人工修改后的代码
     should_interrupt: bool = True   # 是否进入 HITL 中断（诊断/前端显示）
 
@@ -51,18 +51,18 @@ def build_human_review_request(state: FactorAgentState) -> Dict[str, Any]:
 
 
 
-def normalize_review_response(raw: Any) -> Tuple[Dict[str, Any], str, str | None]:
+def normalize_review_response(raw: Any) -> Tuple[Dict[str, Any], str, Optional[str]]:
     """
     解析并标准化前端回传的人审结果 ui_resp。
 
-    输入可能是：
-    - 字符串（"approved"/"rejected"/"edited" 或 JSON 字符串）
-    - dict（包含 status / human_review_status / edited_code / factor_code 等）
-    - 其他类型（做兜底）
+    2) 新推荐协议（最佳实践）：
+       - dict: {action: "...", payload: {...}}
+         action ∈ {"approve","reject","review","edit"}
+         payload 可包含 review_comment / edited_code
 
-    返回：
+    返回（保持原签名不变）：
     - ui_resp: dict 形式的标准化对象
-    - status: "approved"/"edited"/"rejected" 之一（异常时默认为 "rejected"）
+    - status: "approve"/"edit"/"rejecte"/"review" 之一（异常时默认为 "rejecte"）
     - edited_code: 如存在则返回，否则为 None
     """
     ui_resp = raw
@@ -74,16 +74,40 @@ def normalize_review_response(raw: Any) -> Tuple[Dict[str, Any], str, str | None
         except Exception:
             ui_resp = {"status": ui_resp}
 
-    # 3) 把“嵌套的 status”解开
-    status_raw = ui_resp.get("status") or ui_resp.get("human_review_status")
-    if isinstance(status_raw, dict):
-        status = status_raw.get("status") or status_raw.get("human_review_status")
-    else:
-        status = status_raw
+    if not isinstance(ui_resp, dict):
+        ui_resp = {"status": "rejecte"}
+
+    # 2) 新协议优先：action/payload
+    if ui_resp.get("action"):
+        action = ui_resp.get("action")
+        payload = ui_resp.get("payload") or {}
+
+        # action 归一化成 status
+        action_map = {
+            "approve": "approve",
+            "reject": "rejecte",
+            "review": "review",
+            "edit": "edit",
+            "approve": "approve",
+            "rejecte": "rejecte",
+            "edit": "edit",
+        }
+        status = action_map.get(action, "rejecte")
+
+        if isinstance(payload, dict):
+            edited_code = payload.get("edited_code")
+        else:
+            edited_code = None
+
+        return ui_resp, status, edited_code
 
     edited_code = ui_resp.get("edited_code") or ui_resp.get("factor_code")
 
     if not isinstance(status, str):
-        status = "rejected"
+        status = "rejecte"
+
+    # review 也是合法状态（新加）
+    if status not in ("approve", "edit", "rejecte", "review"):
+        status = "rejecte"
 
     return ui_resp, status, edited_code

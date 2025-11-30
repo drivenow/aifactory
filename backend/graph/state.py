@@ -7,14 +7,11 @@ from typing_extensions import Literal
 from langgraph.graph.message import add_messages  # 或你自定义聚合函数
 import traceback
 
-# -------------------------
-# Enum-like Literals
-# -------------------------
+# =========================
+# 类型定义
+# =========================
 
-HumanReviewStatus = Literal["pending", "edited", "approved", "rejected"]
-DBWriteStatus = Literal["success", "failed", "unknown"]
-
-# route 用于前端进度展示 + 节点间可视化
+# 路由枚举（与 graph 中的节点名保持一致）
 Route = Literal[
     "collect_spec_from_messages",
     "gen_code_react",
@@ -25,6 +22,17 @@ Route = Literal[
     "write_db",
     "finish",
 ]
+
+HumanReviewStatus = Literal[
+    "pending",
+    "review",   # ✅ 新增：只给审核意见
+    "edit",
+    "approve",
+    "rejecte",
+]
+
+DBWriteStatus = Literal["pending", "success", "failed"]
+
 
 def wrap_state_error(
     where: str,
@@ -127,7 +135,8 @@ class FactorAgentState(
 
     ui_request: Optional[Dict[str, Any]]      # 后端发起的人审请求 payload
     ui_response: Optional[Dict[str, Any]]     # 前端回传的人审结果 payload
-    human_review_status: Optional[HumanReviewStatus] = "pending"    # 人审状态：pending/edited/approved/rejected
+    human_review_status: Optional[HumanReviewStatus] = "pending"    # 人审状态：pending/edit/approve/rejecte
+    review_comment: Optional[str] = None      # 人工审核的评论
     human_edits: Optional[str]                # 人工修改后的代码
     should_interrupt: bool = True   # 是否进入 HITL 中断（诊断/前端显示）
 
@@ -180,14 +189,15 @@ class FactorAgentStateModel(BaseModel):
     # HumanReviewState
     ui_request: Dict[str, Any] = Field(default_factory=dict)
     ui_response: Dict[str, Any] = Field(default_factory=dict)
-    human_review_status: Optional[HumanReviewStatus] = "pending"
+    human_review_status: HumanReviewStatus = "pending"
     human_edits: Optional[str] = None
+    review_comment: Optional[str] = None  # ✅ 新增
     should_interrupt: bool = True
 
     # EvalState
     backfill_job_id: Optional[str] = None
     eval_metrics: Dict[str, Any] = Field(default_factory=dict)
-    db_write_status: Optional[DBWriteStatus] = "unknown"
+    db_write_status: Optional[DBWriteStatus] = "pending"
 
     class Config:
         # 如果你希望 state 里偶尔多塞调试字段，又不想报错，可以打开这一行

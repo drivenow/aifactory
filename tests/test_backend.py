@@ -30,7 +30,7 @@ def test_graph_failure_flow_human_review():
         config={"configurable": {"thread_id": "t-fail"}},
     )
     assert s.get("dryrun_result", {}).get("success") is False
-    assert s.get("human_review_status") == "approved"
+    assert s.get("human_review_status") == "approve"
     assert s.get("last_success_node") == "write_db"
 
 

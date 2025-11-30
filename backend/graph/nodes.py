@@ -5,7 +5,7 @@ from typing import Dict, Any, Optional, List
 from langgraph.graph import END
 from langgraph.types import Command, interrupt
 
-from .state import FactorAgentState, FactorAgentStateModel
+from .state import FactorAgentState, FactorAgentStateModel, HumanReviewStatus
 from .domain.logic import extract_spec_and_name
 from .domain.codegen import (
     generate_factor_code_from_spec,
@@ -14,8 +14,8 @@ from .domain.codegen import (
 )
 from .domain.eval import compute_eval_metrics, write_factor_and_metrics
 from .domain.review import build_human_review_request, normalize_review_response
+from .config import RETRY_MAX
 
-RETRY_MAX = 3
 # -------------------------
 # Retry routing helper
 # -------------------------
@@ -31,19 +31,19 @@ def _route_retry_or_hitl(
     - 如果 retry_count >= RETRY_MAX，进入 HITL 节点（默认 "human_review_gate"）
     - 否则，进入重试节点（默认 "gen_code_react"）
     """
-    rc = int(state.get("retry_count", 0)) + 1
+    current = int(state.get("retry_count", 0))
 
-    base_update = {**update, "retry_count": rc}
-
-    if rc >= RETRY_MAX:
+    if current >= RETRY_MAX:
         return {
-            **base_update,
+            **update,
+            "retry_count": current,
             "should_interrupt": True,
             "route": "human_review_gate",
         }
 
     return {
-        **base_update,
+        **update,
+        "retry_count": current + 1,
         "route": target_if_retry,
     }
 
@@ -168,79 +168,130 @@ def semantic_check(state: FactorAgentState) -> Dict[str, Any]:
 
 def human_review_gate(state: FactorAgentState) -> Command:
     """
-    LangGraph 1.0 风格的 HITL 节点（使用 interrupt）
-
-    - 第一次运行到这里：
-        * 构造 req（人审请求 payload）
-        * 调用 interrupt(req) → 图暂停，req 通过 AG-UI 事件流返回给前端
-        * 注意：此时不会执行到下面解析 ui_resp 的代码
-    - 前端调用 resolve(...) 回复后：
-        * 再次运行到这里，interrupt(req) 返回 ui_resp
-        * 使用 domain.review.normalize_review_response 做 JSON 解析 & 类型兜底
-        * 然后根据 status 路由下一步
+    人工审核节点（HITL）
+    - 发起 interrupt，把 req 传出去
+    - 恢复后统一解析前端回传：
+      新协议 action+payload 优先，旧协议 status 兜底
     """
-    # 1) 构造人审请求 payload（纯领域逻辑在 domain.review 中）
-    req = build_human_review_request(state)
+    req = {
+        "type": "code_review",
+        "title": "Review generated factor code",
+        "code": state.get("factor_code", "") or "",
+        "actions": str(HumanReviewStatus.__args__),
+        "retry_count": int(state.get("retry_count", 0)),
+    }
 
-    # 2) 中断：第一次会直接“抛出中断”，恢复时才会返回 ui_resp_raw
+    # 第一次进入：中断并把 req 发给前端
     ui_resp_raw = interrupt(req)
 
-    # 3) 恢复时才会执行到这里：先把原始值打一下 log
-    print(
-        f"[DBG] human_review_gate resume thread={state.get('thread_id')} "
-        f"resp_raw={ui_resp_raw!r} type={type(ui_resp_raw)}"
-    )
-
+    # 允许前端传 string/json/dict 等多形态
     ui_resp, status, edited_code = normalize_review_response(ui_resp_raw)
 
-    # 4) 根据人审结果路由
+    # ===== 新旧协议统一层（推荐 action+payload）=====
+    action = None
+    payload = {}
 
-    # 4.1 审核通过 / 编辑后通过 → 进入回填+评价
-    if status in ("approved", "edited"):
+    # 1) 新协议优先：{action, payload}
+    if isinstance(ui_resp, dict) and ui_resp.get("action"):
+        action = ui_resp.get("action")
+        payload = ui_resp.get("payload") or {}
+
+    # 2) 旧协议兜底：{status, review_comment, edited_code}
+    if action is None:
+        print(f"[DBG] human_review_gate old protocol status={status}")
+
+    action_norm = action or "reject"
+    review_comment = payload.get("review_comment") if isinstance(payload, dict) else None
+    edited_code = payload.get("edited_code") if isinstance(payload, dict) else edited_code
+
+    # ---- approve / edit 通过 ----
+    if action_norm in ("approve", "edit"):
         final_code = edited_code or state.get("factor_code")
+
+        # 公共 update 字段
+        base_update = {
+            "ui_request": req,
+            "ui_response": ui_resp,
+            "human_review_status": "edited" if action_norm == "edited" else "approved",
+            "human_edits": edited_code,
+            "factor_code": final_code,
+            "review_comment": review_comment,
+            "last_success_node": "human_review_gate",
+            "error": None,
+        }
+
+        # ✅ 情况 1：用户只是 approve，不改代码 → 可以直通 backfill
+        if action_norm == "approve":
+            return Command(
+                goto="backfill_and_eval",
+                update={
+                    **base_update,
+                    "route": "backfill_and_eval",
+                },
+            )
+
+        # ✅ 情况 2：用户 edit 了代码 → 回到 dryrun 重新跑一遍
+        if action_norm == "edit":
+            return Command(
+                goto="dryrun",
+                update={
+                    **base_update,
+                    "route": "dryrun",
+                    # 可选：把旧的 dryrun/semantic_check 结果清空或标记为过期
+                    "dryrun_result": {},
+                    "semantic_ok": False,
+                },
+            )
+
+    # ---- review 只给意见 → 回到 gen_code_react ----
+    elif action_norm == "review":
+        comment = (review_comment or "").strip()
+        new_spec = (state.get("user_spec") or "") + f"\n\n[REVIEW COMMENT]\n{comment}"
         return Command(
-            goto="backfill_and_eval",
+            goto="gen_code_react",
             update={
-                "ui_request": req,
-                "ui_response": ui_resp,
-                "human_review_status": status,
-                "human_edits": edited_code,
-                "factor_code": final_code,
+                "user_spec": new_spec,
+                "human_review_status": "review",
+                "review_comment": comment,
                 "last_success_node": "human_review_gate",
                 "error": None,
-                "route": "backfill_and_eval",
+                "route": "gen_code_react",
             },
         )
 
-    # 4.2 审核直接拒绝 → 直接结束
-    if status == "rejected":
+    # ---- reject 结束 ----
+    elif action_norm == "rejecte":
         return Command(
             goto="finish",
             update={
                 "ui_request": req,
                 "ui_response": ui_resp,
-                "human_review_status": "rejected",
+                "human_review_status": "rejecte",
+                "review_comment": review_comment,
                 "last_success_node": "human_review_gate",
                 "error": None,
                 "route": "finish",
             },
         )
-
-    # 4.3 兜底：status 异常，也当 reject 处理
-    return Command(
-        goto="finish",
-        update={
-            "ui_request": req,
-            "ui_response": ui_resp,
-            "human_review_status": "rejected",
-            "last_success_node": "human_review_gate",
-            "error": {
-                "node": "human_review_gate",
-                "message": f"invalid ui_response status={status!r}",
+    else:
+        print(f"[DBG] human_review_gate invalid action={action_norm!r}")
+        # ---- 兜底非法 action ----
+        return Command(
+            goto="finish",
+            update={
+                "ui_request": req,
+                "ui_response": ui_resp,
+                "human_review_status": "rejecte",
+                "review_comment": review_comment,
+                "last_success_node": "human_review_gate",
+                "error": {
+                    "node": "human_review_gate",
+                    "message": f"invalid ui_response action={action!r}",
+                },
+                "route": "finish",
             },
-            "route": "finish",
-        },
     )
+
 
 
 def backfill_and_eval(state: FactorAgentState) -> Dict[str, Any] :

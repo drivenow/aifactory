@@ -355,7 +355,7 @@ codegen_graph = codegen_builder.compile(checkpointer=...)
     LogicState = {"logic_spec": "...", "logic_prompt": "..."}
     CodeGenState = {"factor_code": "...", "code_prompt": "..."}
     EvalState = {"eval_metrics": {...}}
-    HumanReviewState = {"human_review_status": "approved", "retry_count": 1}
+    HumanReviewState = {"human_review_status": "approve", "retry_count": 1}
 
     FactorAgentState = 以上所有键的并集（同一层）
 

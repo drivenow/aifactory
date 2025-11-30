@@ -90,7 +90,7 @@ class FactorAgentState(MessagesState):
     semantic_check: dict | None = None   # {ok, diffs, reason}
 
     # HITL
-    human_review_status: str = "pending" # pending/edited/approved/rejected
+    human_review_status: str = "pending" # pending/edit/approve/rejecte
     human_edits: str | None = None       # 人工修改后的完整代码
 
     # 回填/评价/入库
@@ -139,7 +139,7 @@ class SemanticCheckResult(BaseModel):
     reason: str | None = None
 
 class HumanReviewAction(BaseModel):
-    status: str  # approved/edited/rejected
+    status: str  # approve/edit/rejecte
     edited_code: str | None = None
 
 class BackfillAction(BaseModel):
@@ -258,8 +258,8 @@ def write_factor_and_metrics_mock(name, metrics, values_artifact) -> dict: ...
   * fail & retry_count>=5 → `human_review_gate`（should_interrupt=True）
 * `human_review_gate`
 
-  * approved/edited → `backfill_and_eval -> write_db -> finish`
-  * rejected → `finish`
+  * approve/edit → `backfill_and_eval -> write_db -> finish`
+  * rejecte → `finish`
 
 ---
 

@@ -79,7 +79,7 @@ def build_graph() -> StateGraph:
     g.add_conditional_edges(
         "human_review_gate",
         route_from_state,
-        ["backfill_and_eval", "finish"],
+        ["backfill_and_eval","dryrun","gen_code_react","finish"],
     )
 
     g.add_edge("backfill_and_eval", "write_db")

@@ -120,9 +120,9 @@ AGENT_URL=http://localhost:8001/agent npm run dev
 
 ## 人审反馈（HIL）
 - 前端按钮已绑定：
-  - Approve：`agent.humanFeedback({ human_review_status: "approved" })`
-  - Reject：`agent.humanFeedback({ human_review_status: "rejected" })`
-  - Submit Edit：`agent.humanFeedback({ human_review_status: "edited", factor_code: code, human_edits: "edited in UI" })`
+  - Approve：`agent.humanFeedback({ human_review_status: "approve" })`
+  - Reject：`agent.humanFeedback({ human_review_status: "rejecte" })`
+  - Submit Edit：`agent.humanFeedback({ human_review_status: "edit", factor_code: code, human_edits: "edit in UI" })`
 - CopilotKit 适配器会调用后端的 `POST /agent/feedback` 并携带完整上下文 envelope，使图从中断点继续：`backfill_and_eval → write_db → finish`
 
 后端手工验证（仅用于排查适配器与路径）：
@@ -137,7 +137,7 @@ curl -s -X POST http://localhost:8001/agent/feedback \
     "tools":[],
     "context":[],
     "forwardedProps":{},
-    "state": { "human_review_status": "approved" }
+    "state": { "human_review_status": "approve" }
   }'
 ```
 
