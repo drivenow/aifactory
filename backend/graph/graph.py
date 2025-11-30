@@ -33,11 +33,33 @@ def build_graph() -> StateGraph:
     g.add_node("write_db", nodes.write_db)
     g.add_node("finish", nodes.finish)
 
-    # 入口
-    g.set_entry_point("collect_spec")
+    """
+    一个简单的选型口诀：
+    - 流程是“图结构” → 静态边
+    - 流程是“节点决策” → Command.goto
+    - 需要跨图/多 agent/原子跳转 → Command.goto
+    - 想要最强可读性和可视化 → 静态边
+    - 避坑：要么让节点用 Command 控流（不加外部 edges），要么用 edges（节点别返回 goto）。
+        因为 goto 不会覆盖静态边，两边都会执行，且执行顺序是：先静态边目标，再 goto 目标。这个行为目前文档里也在补充说明中。
 
-    # 纯 Command 模式：不声明中间边
-    # 但显式声明 finish -> END，避免未来改动时产生悬空终点
+    以下用静态边 （线性、无分支）：
+
+    collect_spec / backfill_and_eval / write_db / finish
+    主干最好静态边，异常/重试用 Command 。
+    gen_code_react / dryrun / semantic_check
+
+    必须用 Command （HITL 恢复后动态分叉）。
+    human_review_gate
+
+    """
+    g.set_entry_point("collect_spec")
+    g.add_edge("collect_spec", "gen_code_react")
+    g.add_edge("gen_code_react", "dryrun")
+    g.add_edge("dryrun", "semantic_check")
+    g.add_edge("semantic_check", "human_review_gate")
+    g.add_edge("human_review_gate", "backfill_and_eval")
+    g.add_edge("backfill_and_eval", "write_db")
+    g.add_edge("write_db", "finish")
     g.add_edge("finish", END)
 
     return g
@@ -49,18 +71,6 @@ graph = build_graph().compile(checkpointer=MemorySaver())
 
 if __name__ == "__main__":
     # 手动运行本文件时生成流程图，避免 import 副作用
-    try:
-        graph_image = graph.get_graph().draw_mermaid_png()
-        with open("workflow.png", "wb") as f:
-            f.write(graph_image)
-        print("流程图已保存为 workflow.png")
-    except Exception as e:
-        print("[WARN] draw graph failed:", e)
-
-
-
-if __name__ == "__main__":
-    # 仅在手动运行本文件时生成流程图，避免 import 副作用
     try:
         graph_image = graph.get_graph().draw_mermaid_png()
         with open("workflow.png", "wb") as f:

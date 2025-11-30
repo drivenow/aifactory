@@ -125,7 +125,7 @@ def _route_retry_or_hitl(
 # Nodes
 # -------------------------
 
-def collect_spec(state: FactorAgentState) -> Command:
+def collect_spec(state: FactorAgentState) -> Dict[str, Any] | Command:
     """
     收集用户因子描述与名称，并进入代码生成阶段。
 
@@ -139,7 +139,7 @@ def collect_spec(state: FactorAgentState) -> Command:
         f"spec_len={len(spec) if isinstance(spec, str) else 0} name={name}"
     )
 
-    update = {
+    return {
         "user_spec": spec,
         "factor_name": name,
         "retry_count": int(state.get("retry_count", 0)),
@@ -147,10 +147,9 @@ def collect_spec(state: FactorAgentState) -> Command:
         "error": None,
         "route": "gen_code_react",
     }
-    return Command(goto="gen_code_react", update=update)
 
 
-def gen_code_react(state: FactorAgentState) -> Command:
+def gen_code_react(state: FactorAgentState) -> Dict[str, Any] | Command:
     """
     按模板生成因子代码（可以在这里替换为 ReAct 代理等更复杂的实现）
 
@@ -172,15 +171,12 @@ def gen_code_react(state: FactorAgentState) -> Command:
 
         action = CodeGenAction(factor_code=code)
 
-        return Command(
-            goto="dryrun",
-            update={
-                "factor_code": action.factor_code,
-                "last_success_node": "gen_code_react",
-                "error": None,
-                "route": "dryrun",
-            },
-        )
+        return {
+            "factor_code": action.factor_code,
+            "last_success_node": "gen_code_react",
+            "error": None,
+            "route": "dryrun",
+        }
 
     except Exception as e:
         print(
@@ -196,7 +192,7 @@ def gen_code_react(state: FactorAgentState) -> Command:
         )
 
 
-def dryrun(state: FactorAgentState) -> Command:
+def dryrun(state: FactorAgentState) -> Dict[str, Any] | Command:
     """
     沙盒试运行 `run_factor` 入口，成功则进入语义检查，失败则走重试/HITL。
     """
@@ -211,18 +207,15 @@ def dryrun(state: FactorAgentState) -> Command:
     )
 
     if success:
-        return Command(
-            goto="semantic_check",
-            update={
-                "dryrun_result": {
-                    "success": True,
-                    "stdout": result.get("stdout", ""),
-                },
-                "last_success_node": "dryrun",
-                "error": None,
-                "route": "semantic_check",
+        return {
+            "dryrun_result": {
+                "success": True,
+                "stdout": result.get("stdout", ""),
             },
-        )
+            "last_success_node": "dryrun",
+            "error": None,
+            "route": "semantic_check",
+        }
 
     # 失败：写入错误信息 & 统一路由
     return _route_retry_or_hitl(
@@ -240,7 +233,7 @@ def dryrun(state: FactorAgentState) -> Command:
     )
 
 
-def semantic_check(state: FactorAgentState) -> Command:
+def semantic_check(state: FactorAgentState) -> Dict[str, Any] | Command:
     """
     语义一致性检查：要求 spec、code 存在且 dryrun 成功。
     """
@@ -254,15 +247,12 @@ def semantic_check(state: FactorAgentState) -> Command:
     print(f"[DBG] semantic_check thread={state.get('thread_id')} ok={result.ok}")
 
     if result.ok:
-        return Command(
-            goto="human_review_gate",
-            update={
-                "semantic_check": {"pass": True},
-                "last_success_node": "semantic_check",
-                "error": None,
-                "route": "human_review_gate",
-            },
-        )
+        return {
+            "semantic_check": {"pass": True},
+            "last_success_node": "semantic_check",
+            "error": None,
+            "route": "human_review_gate",
+        }
 
     return _route_retry_or_hitl(
         state,
@@ -358,7 +348,7 @@ def human_review_gate(state: FactorAgentState) -> Command:
     )
 
 
-def backfill_and_eval(state: FactorAgentState) -> Command:
+def backfill_and_eval(state: FactorAgentState) -> Dict[str, Any] | Command:
     """
     历史回填与评价（mock），完成后进入入库。
 
@@ -371,18 +361,15 @@ def backfill_and_eval(state: FactorAgentState) -> Command:
         f"metrics_keys={list(metrics.keys())}"
     )
 
-    return Command(
-        goto="write_db",
-        update={
-            "eval_metrics": metrics,
-            "last_success_node": "backfill_and_eval",
-            "error": None,
-            "route": "write_db",
-        },
-    )
+    return {
+        "eval_metrics": metrics,
+        "last_success_node": "backfill_and_eval",
+        "error": None,
+        "route": "write_db",
+    }
 
 
-def write_db(state: FactorAgentState) -> Command:
+def write_db(state: FactorAgentState) -> Dict[str, Any] | Command:
     """
     将评价结果入库（mock），然后进入结束节点。
     """
@@ -396,25 +383,22 @@ def write_db(state: FactorAgentState) -> Command:
         f"status={res.get('status', 'unknown')}"
     )
 
-    return Command(
-        goto="finish",
-        update={
-            "db_write_status": res.get("status", "success"),
-            "last_success_node": "write_db",
-            "error": None,
-            "route": "finish",
-        },
-    )
+    return {
+        "db_write_status": res.get("status", "success"),
+        "last_success_node": "write_db",
+        "error": None,
+        "route": "finish",
+    }
 
 
-def finish(state: FactorAgentState) -> Command:
+def finish(state: FactorAgentState) -> Dict[str, Any] | Command:
     """
     结束节点：简单跳转到 END，不再更新状态。
 
     - graph 层面有显式 finish -> END 的边
     """
     print(f"[DBG] finish thread={state.get('thread_id')}")
-    return Command(goto=END, update={})
+    return {}
 
 
 """
