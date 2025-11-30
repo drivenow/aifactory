@@ -6,14 +6,16 @@ from langgraph.graph import END
 from langgraph.types import Command, interrupt
 
 from .state import FactorAgentState, FactorAgentStateModel, HumanReviewStatus
-from .domain.logic import extract_spec_and_name
-from .domain.codegen import (
+from .domain import (
+    extract_spec_and_name,
     generate_factor_code_from_spec,
     run_factor_dryrun,
     is_semantic_check_ok,
+    compute_eval_metrics,
+    write_factor_and_metrics,
+    build_human_review_request,
+    normalize_review_response,
 )
-from .domain.eval import compute_eval_metrics, write_factor_and_metrics
-from .domain.review import build_human_review_request, normalize_review_response
 from .config import RETRY_MAX
 
 # -------------------------

@@ -1,4 +1,4 @@
-PROMPR_FACTOR_L3_PY = """【角色】
+PROMPT_FACTOR_L3_CPP = """【角色】
 你是一个量化高频因子工程师助手，目标是：根据用户给出的自然语言描述，生成一份可以在 L3FactorFrame 框架中直接运行的 Python 因子代码（单个 .py 文件）。
 
 【运行环境与框架约束】
@@ -81,4 +81,35 @@ PROMPR_FACTOR_L3_PY = """【角色】
    #         }
    #     ]
    # }
+   ```
+7. 代码示例
+  ```python
+  import numpy as np
+  from L3FactorFrame.FactorBase import FactorBase  # 导入依赖（模板）
+  from L3FactorFrame.tools.DecimalUtil import isEqual, notEqual
+
+  class FactorBuyWillingByPrice(FactorBase):  # 因子类名需与文件名一致（模板）
+      def __init__(self, config, factorManager, marketDataManager):  # 初始化函数的参数固定（模板）
+          super().__init__(config, factorManager, marketDataManager)  # 继承父类及参数固定（模板）
+          self.nonfactor = self.get_factor_instance("FactorSecTradeAgg")  # 若调用nonfactor，使用self.get_factor_instance方法
+
+      def calculate(self):
+          buy_money = self.nonfactor.trade_buy_money_list[-1]  # 调用NonFactor，采样数据在nonfactor中实现
+          sell_money = self.nonfactor.trade_sell_money_list[-1]
+          buy_num = self.nonfactor.trade_buy_num_list[-1]
+          sell_num = self.nonfactor.trade_sell_num_list[-1]
+
+          diff_v = (buy_money)/(buy_num+1)-(sell_money)/(sell_num+1)
+          sum_v = (buy_money)/(buy_num+1)+(sell_money)/(sell_num+1)
+          if sum_v>0:
+              self.addFactorValue(diff_v/sum_v)  # addFactorValue 算出因子值添加到结果中（模板）
+          else:
+              self.addFactorValue(0.0)
+  
+  ```
+
 """
+
+PROMPT_FACTOR_L3_PY = PROMPT_FACTOR_L3_CPP
+
+

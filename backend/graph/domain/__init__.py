@@ -1,11 +1,9 @@
 # backend/graph/domain/__init__.py
-"""
-领域逻辑模块（domain layer）
-
-这里放与具体 LangGraph/Command 无关的纯业务函数：
-
-- logic:    需求/描述提取相关
-- codegen:  因子代码生成 + 沙盒 dryrun + 语义检查
-- eval:     回测评价 & mock 入库
-- review:   人审请求构造与人审结果解析
-"""
+from .logic_gen import extract_spec_and_name
+from .code_gen import (
+    generate_factor_code_from_spec,
+    run_factor_dryrun,
+    is_semantic_check_ok,
+)
+from .eval import compute_eval_metrics, write_factor_and_metrics
+from .review import build_human_review_request, normalize_review_response

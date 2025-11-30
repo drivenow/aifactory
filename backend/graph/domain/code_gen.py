@@ -1,4 +1,4 @@
-# backend/graph/domain/codegen.py
+# backend/graph/domain/code_gen.py
 from __future__ import annotations
 
 from typing import Dict, Any, Optional
@@ -10,6 +10,12 @@ from ..tools.factor_template import (
     simple_factor_body_from_spec,
 )
 from ..tools.sandbox_runner import run_code
+from ..config import get_llm
+from ..prompts.factor_l3_py import PROMPT_FACTOR_L3_PY
+from langgraph.agents import create_react_agent
+from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.tools import tool
+import re
 
 
 class CodeGenView(ViewBase):
@@ -32,14 +38,41 @@ class CodeGenView(ViewBase):
 
 
 def generate_factor_code_from_spec(state: FactorAgentState) -> str:
-    """
-    根据用户的自然语言 spec 生成模板化因子代码。
-
-    目前是简单模板：
-    - simple_factor_body_from_spec: 生成函数 body
-    - render_factor_code: 根据因子名 + 描述 + body 渲染出完整 Python 代码
-    """
     view = CodeGenView.from_state(state)
+    llm = get_llm()
+
+    if not llm:
+        body = simple_factor_body_from_spec(view.user_spec)
+        return render_factor_code(view.factor_name, view.user_spec, body)
+
+    agent = create_react_agent(llm)
+
+    sys = SystemMessage(
+        content=(
+            "你是量化高频因子工程师助手。根据用户描述生成因子代码，"
+            "必须生成符合高频因子计算的模板，获取指定的的行情数据，返回规定的数据格式。"
+            "优先调用 propose_body 生成主体，再用 render_factor 渲染完整代码。"
+            "如需验证，调用 dryrun_code。最终只返回三引号包裹的完整 Python 代码。\n\n" + PROMPT_FACTOR_L3_PY
+        )
+    )
+
+    user = HumanMessage(
+        content=(
+            f"因子名: {view.factor_name}\n"
+            f"描述: {view.user_spec}\n"
+            "请输出完整代码。"
+        )
+    )
+
+    out = agent.invoke({"messages": [sys, user]})
+    msgs = out.get("messages") or []
+    txt = ""
+    if msgs:
+        last = msgs[-1]
+        txt = getattr(last, "content", "") or str(last)
+    m = re.search(r"```(?:python)?\n([\s\S]*?)```", txt)
+    if m:
+        return m.group(1)
     body = simple_factor_body_from_spec(view.user_spec)
     return render_factor_code(view.factor_name, view.user_spec, body)
 
@@ -56,3 +89,12 @@ def run_factor_dryrun(state: FactorAgentState) -> Dict[str, Any]:
 def is_semantic_check_ok(state: FactorAgentState) -> bool:
     view = CodeGenView.from_state(state)
     return view.semantic_check.get("pass", True), view.semantic_check
+
+
+if __name__ == "__main__":
+    state = {
+        "user_spec": "Compute 5-day moving average of close price",
+        "factor_name": "MovingAvgFactor",
+    }
+    code = generate_factor_code_from_spec(state)
+    print(code)
