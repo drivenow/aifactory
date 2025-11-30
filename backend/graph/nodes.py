@@ -1,24 +1,27 @@
-# nodes.py
+# backend/graph/nodes.py
 from __future__ import annotations
 
 from typing import Dict, Any, Optional
 
 from pydantic import BaseModel, Field
 from langgraph.graph import END
-# nodes.py 顶部
 from langgraph.types import Command, interrupt
 
-
 from .state import FactorAgentState
-from .tools.factor_template import render_factor_code, simple_factor_body_from_spec
-from .tools import mock_evals
-from .tools.sandbox_runner import run_code
+from .domain.logic import extract_spec_and_name
+from .domain.codegen import (
+    generate_factor_code_from_spec,
+    run_factor_dryrun,
+    is_semantic_check_ok,
+)
+from .domain.eval import compute_eval_metrics, write_factor_and_metrics
+from .domain.review import build_human_review_request, normalize_review_response
 
 RETRY_MAX = 5  # 超过该次数强制进入 HITL
 
 
 # -------------------------
-# Pydantic action schemas
+# Pydantic action schemas（作为结构文档/调试用）
 # -------------------------
 
 class IntentAction(BaseModel):
@@ -105,7 +108,11 @@ def _route_retry_or_hitl(
         # 强制进入 HITL
         return Command(
             goto="human_review_gate",
-            update={**base_update, "should_interrupt": True, "route": "human_review_gate"},
+            update={
+                **base_update,
+                "should_interrupt": True,
+                "route": "human_review_gate",
+            },
         )
 
     return Command(
@@ -119,23 +126,13 @@ def _route_retry_or_hitl(
 # -------------------------
 
 def collect_spec(state: FactorAgentState) -> Command:
-    """收集用户因子描述与名称，并进入代码生成阶段"""
-    spec = state.get("user_spec")
-    if not spec:
-        msgs = state.get("messages", [])
-        if isinstance(msgs, list) and msgs:
-            last = msgs[-1]
-            if isinstance(last, dict):
-                spec = last.get("content", "") or str(last)
-            else:
-                c = getattr(last, "content", None)
-                if c is None:
-                    c = getattr(last, "text", None)
-                spec = c if c is not None else str(last)
-        else:
-            spec = ""
+    """
+    收集用户因子描述与名称，并进入代码生成阶段。
 
-    name = state.get("factor_name") or "factor"
+    - 从 state.user_spec 或 messages[-1] 中提取描述
+    - 因子名默认为 "factor"
+    """
+    spec, name = extract_spec_and_name(state)
 
     print(
         f"[DBG] collect_spec thread={state.get('thread_id')} "
@@ -154,15 +151,19 @@ def collect_spec(state: FactorAgentState) -> Command:
 
 
 def gen_code_react(state: FactorAgentState) -> Command:
-    """按模板生成因子代码（ReAct 代理也可以在这里替换/接入）"""
+    """
+    按模板生成因子代码（可以在这里替换为 ReAct 代理等更复杂的实现）
+
+    - 使用 domain.codegen.generate_factor_code_from_spec
+    - 失败时走统一重试/HITL 策略
+    """
     try:
         spec = state.get("user_spec") or ""
         if not spec:
             raise ValueError("missing user_spec in state")
 
         name = state.get("factor_name") or "factor"
-        body = simple_factor_body_from_spec(spec)
-        code = render_factor_code(name, spec, body)
+        code = generate_factor_code_from_spec(name, spec)
 
         print(
             f"[DBG] gen_code_react thread={state.get('thread_id')} "
@@ -182,7 +183,9 @@ def gen_code_react(state: FactorAgentState) -> Command:
         )
 
     except Exception as e:
-        print(f"[DBG] gen_code_react error thread={state.get('thread_id')} msg={str(e)}")
+        print(
+            f"[DBG] gen_code_react error thread={state.get('thread_id')} msg={str(e)}"
+        )
         return _route_retry_or_hitl(
             state,
             {
@@ -194,13 +197,12 @@ def gen_code_react(state: FactorAgentState) -> Command:
 
 
 def dryrun(state: FactorAgentState) -> Command:
-    """沙盒试运行 `run_factor` 入口，成功则进入语义检查，失败则走重试/HITL"""
+    """
+    沙盒试运行 `run_factor` 入口，成功则进入语义检查，失败则走重试/HITL。
+    """
     code = state.get("factor_code", "") or ""
-    result = run_code(
-        code,
-        entry="run_factor",
-        args={"args": ["2020-01-01", "2020-01-10", ["A"]], "kwargs": {}},
-    )
+
+    result = run_factor_dryrun(code)
     success = bool(result.get("success"))
 
     print(
@@ -212,13 +214,17 @@ def dryrun(state: FactorAgentState) -> Command:
         return Command(
             goto="semantic_check",
             update={
-                "dryrun_result": {"success": True, "stdout": result.get("stdout", "")},
+                "dryrun_result": {
+                    "success": True,
+                    "stdout": result.get("stdout", ""),
+                },
                 "last_success_node": "dryrun",
                 "error": None,
                 "route": "semantic_check",
             },
         )
 
+    # 失败：写入错误信息 & 统一路由
     return _route_retry_or_hitl(
         state,
         {
@@ -235,12 +241,14 @@ def dryrun(state: FactorAgentState) -> Command:
 
 
 def semantic_check(state: FactorAgentState) -> Command:
-    """语义一致性检查：要求 spec、code 存在且 dryrun 成功"""
+    """
+    语义一致性检查：要求 spec、code 存在且 dryrun 成功。
+    """
     spec = state.get("user_spec", "") or ""
     code = state.get("factor_code", "") or ""
     dry_ok = bool(state.get("dryrun_result", {}).get("success"))
 
-    ok = bool(spec) and bool(code) and dry_ok
+    ok = is_semantic_check_ok(spec, code, dry_ok)
     result = SemanticCheckResult(ok=ok)
 
     print(f"[DBG] semantic_check thread={state.get('thread_id')} ok={result.ok}")
@@ -259,12 +267,19 @@ def semantic_check(state: FactorAgentState) -> Command:
     return _route_retry_or_hitl(
         state,
         {
-            "semantic_check": {"pass": False, "reason": "spec/code/dryrun mismatch"},
-            "error": {"node": "semantic_check", "message": "semantic_check failed"},
+            "semantic_check": {
+                "pass": False,
+                "reason": "spec/code/dryrun mismatch",
+            },
+            "error": {
+                "node": "semantic_check",
+                "message": "semantic_check failed",
+            },
             "last_success_node": "semantic_check",
         },
         target_if_retry="gen_code_react",
     )
+
 
 def human_review_gate(state: FactorAgentState) -> Command:
     """
@@ -276,50 +291,26 @@ def human_review_gate(state: FactorAgentState) -> Command:
         * 注意：此时不会执行到下面解析 ui_resp 的代码
     - 前端调用 resolve(...) 回复后：
         * 再次运行到这里，interrupt(req) 返回 ui_resp
-        * 这里对 ui_resp 做 JSON 解析 & 类型兜底，然后路由下一步
+        * 使用 domain.review.normalize_review_response 做 JSON 解析 & 类型兜底
+        * 然后根据 status 路由下一步
     """
+    # 1) 构造人审请求 payload（纯领域逻辑在 domain.review 中）
+    req = build_human_review_request(state)
 
-    # 1) 构造人审请求 payload
-    req = {
-        "type": "code_review",
-        "title": "Review generated factor code",
-        "code": state.get("factor_code", "") or "",
-        "actions": ["approve", "edit", "reject"],
-        "retry_count": int(state.get("retry_count", 0)),
-    }
-
-    # 2) 中断：第一次会直接“抛出中断”，恢复时才会返回 ui_resp
-    ui_resp = interrupt(req)
+    # 2) 中断：第一次会直接“抛出中断”，恢复时才会返回 ui_resp_raw
+    ui_resp_raw = interrupt(req)
 
     # 3) 恢复时才会执行到这里：先把原始值打一下 log
     print(
         f"[DBG] human_review_gate resume thread={state.get('thread_id')} "
-        f"resp_raw={ui_resp!r} type={type(ui_resp)}"
+        f"resp_raw={ui_resp_raw!r} type={type(ui_resp_raw)}"
     )
 
-   # 1) 字符串 → 尝试当 JSON 解析
-    if isinstance(ui_resp, str):
-        try:
-            ui_resp = json.loads(ui_resp)
-        except Exception:
-            ui_resp = {"status": ui_resp}
+    ui_resp, status, edited_code = normalize_review_response(ui_resp_raw)
 
-    # 2) 再兜底一次：必须是 dict
-    if not isinstance(ui_resp, dict):
-        ui_resp = {"status": str(ui_resp)}
+    # 4) 根据人审结果路由
 
-    # 3) 把“嵌套的 status”解开：
-    status_raw = ui_resp.get("status") or ui_resp.get("human_review_status")
-    if isinstance(status_raw, dict):
-        status = status_raw.get("status") or status_raw.get("human_review_status")
-    else:
-        status = status_raw
-
-    edited_code = ui_resp.get("edited_code") or ui_resp.get("factor_code")
-
-    # 5) 根据人审结果路由
-
-    # 5.1 审核通过 / 编辑后通过 → 进入回填+评价
+    # 4.1 审核通过 / 编辑后通过 → 进入回填+评价
     if status in ("approved", "edited"):
         final_code = edited_code or state.get("factor_code")
         return Command(
@@ -336,7 +327,7 @@ def human_review_gate(state: FactorAgentState) -> Command:
             },
         )
 
-    # 5.2 审核直接拒绝 → 直接结束
+    # 4.2 审核直接拒绝 → 直接结束
     if status == "rejected":
         return Command(
             goto="finish",
@@ -350,7 +341,7 @@ def human_review_gate(state: FactorAgentState) -> Command:
             },
         )
 
-    # 5.3 兜底：status 异常，也当 reject 处理
+    # 4.3 兜底：status 异常，也当 reject 处理
     return Command(
         goto="finish",
         update={
@@ -368,11 +359,12 @@ def human_review_gate(state: FactorAgentState) -> Command:
 
 
 def backfill_and_eval(state: FactorAgentState) -> Command:
-    """历史回填与评价（mock），完成后进入入库"""
-    ic = mock_evals.factor_ic_mock()
-    to = mock_evals.factor_turnover_mock()
-    gp = mock_evals.factor_group_perf_mock()
-    metrics = {"ic": ic, "turnover": to, "group_perf": gp}
+    """
+    历史回填与评价（mock），完成后进入入库。
+
+    - domain.eval.compute_eval_metrics 负责生成指标
+    """
+    metrics = compute_eval_metrics()
 
     print(
         f"[DBG] backfill_and_eval thread={state.get('thread_id')} "
@@ -391,10 +383,13 @@ def backfill_and_eval(state: FactorAgentState) -> Command:
 
 
 def write_db(state: FactorAgentState) -> Command:
-    """将评价结果入库（mock），然后进入结束节点"""
+    """
+    将评价结果入库（mock），然后进入结束节点。
+    """
     name = state.get("factor_name") or "factor"
     metrics = state.get("eval_metrics", {}) or {}
-    res = mock_evals.write_factor_and_metrics_mock(name, metrics)
+
+    res = write_factor_and_metrics(name, metrics)
 
     print(
         f"[DBG] write_db thread={state.get('thread_id')} "
@@ -413,7 +408,11 @@ def write_db(state: FactorAgentState) -> Command:
 
 
 def finish(state: FactorAgentState) -> Command:
-    """结束节点"""
+    """
+    结束节点：简单跳转到 END，不再更新状态。
+
+    - graph 层面有显式 finish -> END 的边
+    """
     print(f"[DBG] finish thread={state.get('thread_id')}")
     return Command(goto=END, update={})
 

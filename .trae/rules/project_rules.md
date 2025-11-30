@@ -1,459 +1,377 @@
-# 开发需求
+我要实现以下短期和中期的改造：
+短期（现在）
 
-你是一个专业的Agent研发助手，请帮我用langgraph构建一个量化研究领域选股因子编码助手的Agent，用到create_react_agent构建代理，用agenteval做评估，并且通过copilotkit做前端展示。我需要搭建一个原型，请帮我出一个mvp设计方案。把后端和前端的方案分开，设计控制流和human in loop等事件流。
+后端继续保持 单一 FactorAgentGraph：
 
-因子编码助手要实现的功能如下：
-（0）准备一个因子模版，包含加载数据和计算功能；准备一套因子评价的代码，这些工具函数先mock实现，后续再替换为实例的业务逻辑。
-（1）根据用户的描述，按照因子模板生成代码。
-（2）代码试运行，如果运行失败或者产生的逻辑和用户描述不符合，引入react机制重试至多5次；
-（3）代码生成完引入人工审核机制；允许human in loop修改和确认代码；
-（4）代码经审核通过后，大模型编排流程，完成因子历史数据计算和因子评价结果入库。
-（5）用langgraph再编写Agent，并将langgraph的标准事件定义，可以考虑用ai-ui-langgraph这个框架可以用于快速把langgraph转换为fastapi服务，暴露成fastapi后端；
-（6）前后端交互应该是基于ag-ui协议，这个协议下langgraph的状态和标准事件流都可以传递到前端，copilot对接langgraph的标准事件，并做前端展示。 
+所有节点串在一张图里
+
+state 用一个 FactorAgentState
+
+前端只暴露一个 factor_agent CoAgent（你已经是这样）
+
+命令行调试：
+
+新增一个 cli_debug.py，复用同一个 graph，用 GraphInterrupt + Command(resume) 写个简单 loop 即可
+
+不修改任何节点 / Graph 定义
+
+中期（下一步演进）
+
+把“逻辑生成 / 代码生成 / 评估”等节点背后的逻辑抽成 Python 纯函数
+
+在需要的地方（别的服务 / Cron / 脚本）可以直接调这些函数，不一定每次都走 graph
+
+如果有“只跑逻辑”这类 API，就用 Command(goto="logic_node") 之类的方式，给 Graph 提供多入口
 
 
-下面是**基于你“第6部分及之后开发细节扩展”的修订**、并对前面不合适处做了替换后的**最终完整方案（单一终稿）**。我把所有内容重新组织成一份自洽、无阶段冲突的 MVP 设计文档，你可以直接作为项目设计稿使用。
-
----
-
-# 量化研究选股因子编码助手 Agent（LangGraph + ReAct + agentevals + CopilotKit）
-
-## MVP 最终方案（终稿）
-
-> 目标：用 LangGraph 构建“因子编码助手”原型。
-> 特性：模板化因子生成 → 沙盒试跑 → ReAct 修复重试（≤5）→ 人工审核（HITL）→ 历史回填 + 因子评价（mock）→ 入库（mock）→ AG-UI 事件流前端可观测与可干预。
-> 原则：不造轮子，优先复用 LangGraph、create_react_agent、agentevals、ag-ui-langgraph（ai-ui-langgraph）、CopilotKit、AG-UI 协议。
-
----
-
-## 0. 技术栈与轮子复用
-
-### 0.1 后端选型
-
-* **LangGraph**：编排 Agent 工作流（状态机/图）。
-* **`langgraph.prebuilt.create_react_agent`**：代码生成 + 工具调用 + 反思修复的 ReAct 代理。
-* **agentevals / agent-evals**：离线评估 agent 轨迹与输出，接入 LangSmith。
-* **ag-ui-langgraph（ai-ui-langgraph）**：把 LangGraph 标准事件 & State 自动转成 **AG-UI SSE FastAPI 服务**。
-* **FastAPI**：承载 SSE、健康检查、工件下载/鉴权/落库接口。
-
-### 0.2 前端选型
-
-* **Next.js / React**：UI 主框架。
-* **CopilotKit**：直接消费 AG-UI SSE 事件；支持生成式 UI 与 HITL 交互。
-* **AG-UI Protocol**：前后端一致的标准事件/状态通道。
+好，直接给你一份可以丢给 Codex 的“改造需求 & 实施计划”。
 
 ---
 
-## 1. 功能需求 → 系统能力映射
+## 0. 总体目标
 
-| 需求编号 | 需求描述                              | 最终实现机制                                    |
-| ---- | --------------------------------- | ----------------------------------------- |
-| (0)  | 因子模板 + 评价工具 mock                  | 模板渲染工具 + mock_evals 工具层                   |
-| (1)  | 根据描述按模板生成代码                       | `gen_code_react` ReAct 生成                 |
-| (2)  | 试运行失败/语义不符 ReAct 重试≤5             | dryrun + semantic_check + retry_count 控制  |
-| (3)  | 生成后人工审核，可修改确认                     | `human_review_gate` 触发 AG-UI `ui_request` |
-| (4)  | 审核通过后回填 + 评价入库                    | backfill_and_eval + write_db（mock）        |
-| (5)  | LangGraph Agent + 标准事件，FastAPI 暴露 | ag-ui-langgraph 一键 SSE                    |
-| (6)  | AG-UI 协议前后端通道，CopilotKit 展示       | CopilotKitProvider + AG-UI event render   |
+1. **后端只有一份 LangGraph 图定义**
 
----
+   * 同一份 `graph` 同时给：
 
-## 2. 后端 MVP 设计
+     * CopilotKit / 前端调用
+     * 命令行 CLI 调试调用
+   * 节点逻辑 / State 类型不再因为“前端 vs CLI”而分叉。
 
-### 2.1 State（最终版）
+2. **能力模块化**
 
-> 使用 LangGraph `MessagesState` 做消息管理 + 扩展业务字段。
-> 所有节点输出用 `Command(goto=..., update=...)` 路由，消除前后阶段冲突。
-
-```python
-# backend/graph/state.py
-from langgraph.graph import MessagesState
-
-class FactorAgentState(MessagesState):
-    # 流程路由与控制
-    route: str = "collect_spec"
-    should_interrupt: bool = False
-    retry_count: int = 0                 # 全局重试计数（<=5）
-    system_date: str | None = None
-
-    # 用户需求与产物
-    user_spec: str = ""                  # 因子自然语言描述
-    factor_name: str | None = None
-    factor_code: str | None = None       # 模板化完整因子代码
-
-    # 上下文稳态
-    overwrite_fields: list[str] = []     # 显式声明需要覆盖/置空的字段
-    short_summary: str | None = None     # 会话短摘要，跨节点维持稳态
-
-    # 校验结果
-    dryrun_result: dict | None = None    # {ok, stdout, stderr, traceback}
-    semantic_check: dict | None = None   # {ok, diffs, reason}
-
-    # HITL
-    human_review_status: str = "pending" # pending/edited/approved/rejected
-    human_edits: str | None = None       # 人工修改后的完整代码
-
-    # 回填/评价/入库
-    eval_metrics: dict | None = None     # mock 评价结果
-    backfill_job_id: str | None = None
-    db_write_status: str | None = None
-
-    # 工件区（可供前端下载/展示）
-    artifacts: dict = {}                 # {code, logs, reports, preview_stats}
-```
-
-#### 消息滑窗/摘要策略
-
-* 保留最近 K 条消息（建议 K=12）作为主上下文。
-* 每次阶段切换（如进入 HITL / 回填）前做一次 `short_summary`，写入 state，供后续 ReAct 修复稳定语义。
-* 所有模型调用统一拼为：`[system_msg] + last_K_messages + short_summary_hint`
+   * 将“逻辑生成 / 代码生成 / 评估”等封装成可复用模块（函数或子图），
+   * FactorAgent 大图只是 orchestrator，把这些能力串起来。
+   * 将来需要单独暴露“逻辑生成”/“代码生成”能力时，不需要大改，只包一层薄壳。
 
 ---
 
-### 2.2 节点输出模型（Pydantic）
+## 1. 代码结构改造要求
 
-> 保证每个节点的输出结构稳定，便于评估、日志与前端渲染。
+### 1.1 新建/整理后端模块结构（建议）
 
-```python
-class IntentAction(BaseModel):
-    human_input: bool = False
-    message: str | None
-    factor_name: str | None
-    constraints: dict = {}
-
-class CodeGenAction(BaseModel):
-    human_input: bool = False
-    message: str | None
-    factor_code: str | None
-    reflect_notes: str | None
-
-class DryRunResult(BaseModel):
-    ok: bool
-    stdout: str = ""
-    stderr: str = ""
-    traceback: str = ""
-
-class SemanticCheckResult(BaseModel):
-    ok: bool
-    diffs: list[str] = []
-    reason: str | None = None
-
-class HumanReviewAction(BaseModel):
-    status: str  # approved/edited/rejected
-    edited_code: str | None = None
-
-class BackfillAction(BaseModel):
-    ok: bool
-    job_id: str | None = None
-    preview_stats: dict = {}
-
-class EvalAction(BaseModel):
-    ok: bool
-    metrics: dict = {}
-
-class PersistAction(BaseModel):
-    ok: bool
-    uri: str | None = None
-    rows_written: int = 0
-```
-
----
-
-### 2.3 工具层（模板 + 沙盒 + 评价 + 入库，均可替换）
-
-#### 2.3.1 因子模板（最终定义）
-
-* LLM 只填 `{factor_body}`，其余由模板固化。
-* 强制：输入 df 的 index/columns 约定、返回 Series 对齐。
-
-```python
-FACTOR_TEMPLATE = """
-# Factor: {factor_name}
-# Description: {user_spec}
-
-import pandas as pd
-import numpy as np
-
-def load_data(start: str, end: str, universe: list[str]) -> pd.DataFrame:
-    # TODO: will be replaced by real loader
-    raise NotImplementedError
-
-def compute_factor(df: pd.DataFrame) -> pd.Series:
-    # df index: [date, symbol]
-    # df columns: include required fields from user_spec/constraints
-    # return: pd.Series indexed like df
-    {factor_body}
-
-def run_factor(start, end, universe):
-    df = load_data(start, end, universe)
-    fac = compute_factor(df)
-    return fac
-"""
-```
-
-#### 2.3.2 工具接口（mock → 可平滑替换）
-
-```python
-def render_factor_template(factor_name, user_spec, factor_body) -> str: ...
-def run_code(code: str, entry="run_factor", args=None) -> dict: ...
-def evaluate_factor(values, spec) -> dict: ...
-def write_factor_and_metrics_mock(name, metrics, values_artifact) -> dict: ...
-```
-
-#### 2.3.3 沙盒安全护栏
-
-* 禁网、禁文件系统写、禁危险模块。
-* AST 白名单检查（如仅允许 pandas/numpy/scipy）。
-* CPU/内存/时间配额（避免死循环/爆内存）。
-
----
-
-### 2.4 ReAct 代理（create_react_agent）
-
-节点：`gen_code_react`
-
-**工具**
-
-1. `CodeGenTool(factor_template, user_spec, constraints) -> factor_body`
-2. `ErrorFixTool(prev_code, dryrun_error, semantic_diffs, short_summary) -> factor_body`
-
-**输入拼装（每轮）**
-
-* user_spec
-* constraints（从 collect_spec 抽取）
-* 上次 factor_code
-* dryrun traceback（若有）
-* semantic diffs（若有）
-* short_summary
-
-**重试控制（统一放到 graph，而不是 prompt 里）**
-
-* `retry_count` 由节点维护
-* 失败则 `retry_count += 1`
-* `retry_count >= 5` → 强制 `should_interrupt=True`，跳 HITL
-
----
-
-### 2.5 LangGraph 控制流（最终图）
-
-**节点**
-
-1. `collect_spec`：抽取因子名 + 约束（窗口、字段、频率、口径）
-2. `gen_code_react`：ReAct 生成模板化因子代码
-3. `dryrun`：沙盒试运行最小样例
-4. `semantic_check`：语义一致性检查
-5. `react_retry_router`：失败 → 修复重试 / 超限 → HITL
-6. `human_review_gate`：人工审核编辑确认
-7. `backfill_and_eval`：历史回填 + mock 评价
-8. `write_db`：mock 入库
-9. `finish`：输出汇总/提示下一步
-
-**边**
-
-* `collect_spec -> gen_code_react -> dryrun -> semantic_check -> react_retry_router`
-* `react_retry_router`
-
-  * pass → `human_review_gate`
-  * fail & retry_count<5 → `gen_code_react`
-  * fail & retry_count>=5 → `human_review_gate`（should_interrupt=True）
-* `human_review_gate`
-
-  * approved/edited → `backfill_and_eval -> write_db -> finish`
-  * rejected → `finish`
-
----
-
-### 2.6 HITL（Human-in-the-Loop）事件流
-
-节点：`human_review_gate`
-
-**后端行为**
-
-* 发 AG-UI `ui_request`（类型 `code_review`）
-* graph stop & wait
-* 收到 `ui_response` 后更新：
-
-  * `human_review_status`
-  * `human_edits`
-  * `factor_code`
-
----
-
-### 2.7 AG-UI 标准事件规范（最终）
-
-> 所有节点都通过标准事件向前端透传状态与轨迹。
-
-* `assistant_message`
-
-  * `{content, markdown: true}`
-* `state_update`
-
-  * `{route, retry_count, should_interrupt, factor_name, factor_code?, eval_metrics?, db_write_status?}`
-* `tool_call` / `tool_result`
-
-  * call：`{name, input}`
-  * result：`{name, output, ok}`
-* `ui_request` / `ui_response`
-
-  * request：`{type:"code_review", code, notes, actions:[approve, edit, reject]}`
-  * response：`{status, edited_code?}`
-* `interrupt`
-
-  * `{"exceeded_retries": true, "errors": [...]}`
-* `progress`
-
-  * `{"stage":"backfill|evaluate|write_db", "pct":0-100}`
-
----
-
-### 2.8 FastAPI 暴露（ag-ui-langgraph）
-
-```python
-from fastapi import FastAPI
-from ag_ui_langgraph import add_langgraph_fastapi_endpoint
-from graph.graph import graph
-
-app = FastAPI()
-add_langgraph_fastapi_endpoint(app, graph, "/agent")
-
-@app.get("/health")
-def health():
-    return {"ok": True}
-```
-
-可选：
-
-* `/artifacts/{id}`：下载代码/日志/报告工件
-
----
-
-### 2.9 agentevals 离线评估（CI 回归）
-
-**数据集**
-
-* `eval/dataset.jsonl`：`{user_spec, expected_ops, expected_fields}`
-
-**评估器**
-
-1. 轨迹合理性：是否按预期调用 `gen->dryrun->semantic->hitl->backfill`
-2. 可运行率：dryrun ok / backfill ok
-3. 语义对齐：LLM judge 0~1 分
-
-**CI 要求**
-
-* prompt/tools/graph 任一变更 → 必跑评估
-* 设置最低阈值（如运行率 ≥ 0.8）
-
----
-
-## 3. 前端 MVP 设计（CopilotKit + AG-UI）
-
-### 3.1 页面结构（最终）
-
-`/factor-copilot`
-
-* 左侧：CopilotChat（对话 + trace）
-* 右侧：
-
-  * CodeReviewPanel（HITL popup）
-  * MetricsPanel（展示 eval_metrics）
-* 顶部 badge：`running / waiting_human / done`
-
----
-
-### 3.2 CopilotKit 连接 LangGraph SSE
-
-* `CopilotKitProvider`
-* `useCopilotChat({ apiEndpoint: "/agent" })`
-* CopilotKit 自动消费 AG-UI 事件。
-
----
-
-### 3.3 事件 → UI 映射（最终）
-
-| 事件                      | UI 行为                |
-| ----------------------- | -------------------- |
-| assistant_message       | 聊天气泡流式渲染             |
-| tool_call/tool_result   | TracePane 步骤卡片       |
-| state_update            | 刷新右侧面板/顶部 badge      |
-| ui_request(code_review) | 打开 Monaco 编辑器 + 操作按钮 |
-| ui_response             | 发送回后端并锁定面板           |
-| progress                | 长任务进度条               |
-| interrupt/error         | 错误提示 + 引导人工处理        |
-
----
-
-## 4. 端到端运行序列（终稿）
-
-1. 用户输入因子描述
-2. `collect_spec` 结构化：因子名/字段/窗口/口径
-3. `gen_code_react` 生成模板化代码
-4. `dryrun` 沙盒最小样例试跑
-5. `semantic_check` 对齐描述语义
-6. 若失败 → `react_retry_router` 回 `gen_code_react` 重试（≤5）
-7. 进入 `human_review_gate` → 前端编辑确认
-8. 审核通过 → `backfill_and_eval`（历史回填 + mock 评价）
-9. `write_db` mock 入库
-10. `finish` 总结输出、提供工件下载/下一步建议
-
----
-
-## 5. 交付目录结构（最终）
-
-**backend/**
-
-```
+```text
 backend/
-  app.py
-  graph/
-    state.py
-    nodes.py
-    tools/
-      factor_template.py
-      sandbox_runner.py
-      mock_evals.py
-      mock_db.py
-    graph.py
-  prompts/
-    codegen_system.md
-    reflect_fix.md
-    semantic_judge.md
-  eval/
-    dataset.jsonl
-    run_eval.py
+  factor_agent/
+    __init__.py
+    graph.py              # ✅ 唯一的 LangGraph 定义出口（主图）
+    state.py              # ✅ FactorAgentState + 各子 state 类型
+    domain/
+      logic.py            # ✅ 逻辑生成能力（纯函数/子图）
+      codegen.py          # ✅ 代码生成能力（纯函数/子图）
+      eval.py             # ✅ 因子评估能力（纯函数/子图）
+      review.py           # ✅ 人审相关辅助（如果需要）
+    cli_debug.py          # ✅ 命令行调试入口
+  api/
+    copilotkit_route.py   # ✅ CopilotKit /api/copilotkit 实现，复用 factor_agent.graph
 ```
 
-**frontend/**
+**要求：**
 
-```
-frontend/
-  app/factor-copilot/page.tsx
-  components/
-    CopilotChatPane.tsx
-    TracePane.tsx
-    CodeReviewPanel.tsx
-    MetricsPanel.tsx
-    StatusBadge.tsx
-```
+* `factor_agent/graph.py` 导出 **一个编译后的 graph 对象**：`graph: CompiledGraph[FactorAgentState]`。
+* `state.py` 里定义 `FactorAgentState` 以及若干子状态类型（见下文）。
+* `domain/*.py` 不直接依赖 HTTP/前端，只依赖 State / LLM 客户端等。
 
 ---
 
-## 6. 实施清单（按这个顺序开干）
+## 2. Graph 统一定义改造
 
-1. 定义终版 `FactorAgentState` + 消息滑窗/摘要策略
-2. 实现节点（Intent/CodeGen/DryRun/Semantic/HITL/Backfill/Eval/DB）
-3. 封装工具层 mock（模板渲染/沙盒/评价/入库）
-4. 集成 create_react_agent + CodeGen/ErrorFix 工具
-5. 加入 retry_count 路由与 `should_interrupt` 强制 HITL
-6. 接 ag-ui-langgraph 暴露 `/agent` SSE
-7. 前端 CopilotKit 接入，先渲染 chat/trace
-8. 加 CodeReviewPanel 实现 `ui_request/ui_response` HITL
-9. 加 MetricsPanel 展示 mock eval_metrics
-10. 引入 agentevals 数据集 + CI 回归阈值门控
+### 2.1 抽出 graph 定义
+
+**目标：**把当前所有节点 / 边 / checkpointer 的定义集中到 `factor_agent/graph.py`，示意：
+
+```python
+# factor_agent/graph.py
+from langgraph.graph import StateGraph
+from langgraph.checkpoint.memory import MemorySaver  # 之后可换成持久版
+from .state import FactorAgentState
+from .domain.logic import logic_node
+from .domain.codegen import codegen_node
+from .domain.eval import backfill_and_eval_node
+from .domain.review import human_review_gate
+
+builder = StateGraph(FactorAgentState)
+
+builder.add_node("logic", logic_node)
+builder.add_node("codegen", codegen_node)
+builder.add_node("human_review_gate", human_review_gate)
+builder.add_node("backfill_and_eval", backfill_and_eval_node)
+# ... 其他节点 & 边 ...
+
+checkpointer = MemorySaver()  # TODO: 后续可按环境切换
+graph = builder.compile(checkpointer=checkpointer)
+```
+
+**Codex 实现要点：**
+
+1. 确保所有原来散落在别处的节点函数都迁移到 `domain/` 或 `graph.py` 中引用。
+2. 对 CopilotKit 路由 & CLI 调试都统一从 `factor_agent.graph` import `graph`。
+3. 暂时保持现有 checkpointer 不变（方便对比回归），后续再按环境拆分。
 
 ---
 
-如果你要我继续，我可以在下一条直接给你：
+## 3. 命令行调试入口改造
 
-* 按上述终稿实现的 **LangGraph graph.py / nodes.py / tools mock** 代码骨架（可直接复制跑）
-* 以及 **CopilotKit + AG-UI + HITL 前端最小 demo**。
+### 3.1 新建 `factor_agent/cli_debug.py`
+
+**目标：**命令行下可以直接跑完整 FactorAgentGraph，支持 `interrupt` → CLI 输入 → `Command(resume=...)` 的流程。
+
+**具体要求：**
+
+* 使用和前端相同的 `graph` 对象：
+
+  ```python
+  from .graph import graph
+  ```
+* 每次 CLI 调试创建一个新的 `thread_id`，例如 `cli-{uuid}`。
+* `invoke` 调用中捕获 `GraphInterrupt`，打印 payload 后从 `input()` 读用户输入，再用 `Command(resume=...)` 继续。
+
+**Codex 可按以下模板实现：**
+
+```python
+# factor_agent/cli_debug.py
+import uuid
+import json
+from langgraph.errors import GraphInterrupt
+from langgraph.types import Command
+from .graph import graph
+
+def cli_debug():
+  thread_id = f"cli-{uuid.uuid4()}"
+  config = {"configurable": {"thread_id": thread_id}}
+
+  # TODO: 根据实际 State 填一个合理的 init_state
+  current_input = {
+      "messages": [
+          {"role": "user", "content": "帮我设计一个量化因子"}
+      ],
+      "retry_count": 0,
+      # 其他必要的初始字段
+  }
+
+  while True:
+      try:
+          result = graph.invoke(current_input, config=config)
+          print("\n✅ Graph finished.")
+          print(json.dumps(result, ensure_ascii=False, indent=2))
+          break
+      except GraphInterrupt as gi:
+          payload = gi.value
+          print("\n⏸️  Graph interrupted. Payload:")
+          print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+          s = input("\n请输入 resume 值（回车=True；JSON 自动解析）：\n> ").strip()
+          if s == "":
+              resume_val = True
+          else:
+              try:
+                  resume_val = json.loads(s)
+              except json.JSONDecodeError:
+                  resume_val = s
+
+          current_input = Command(resume=resume_val)
+
+if __name__ == "__main__":
+  cli_debug()
+```
+
+**验收标准：**
+
+* 在项目根目录 `poetry run python -m factor_agent.cli_debug` 能跑通：
+
+  * 完整流程能走完；
+  * 命中 `human_review_gate` 时能在命令行看到中断 payload，并通过输入完成 resume。
+
+---
+
+## 4. State 结构改造（便于后续拆分能力）
+
+### 4.1 在 `state.py` 中拆分子状态类型
+
+**目标：**`FactorAgentState` 是多个子领域 State 的组合，利于将来拆成独立 agent / 子图。
+
+**要求示意：**
+
+```python
+# factor_agent/state.py
+from typing_extensions import TypedDict
+
+class LogicState(TypedDict, total=False):
+    logic_prompt: str
+    logic_spec: str
+
+class CodeGenState(TypedDict, total=False):
+    code_prompt: str
+    factor_code: str
+
+class EvalState(TypedDict, total=False):
+    eval_metrics: dict
+
+class HumanReviewState(TypedDict, total=False):
+    human_review_status: str
+    ui_request: dict
+    ui_response: dict
+    retry_count: int
+
+class FactorAgentState(
+    LogicState,
+    CodeGenState,
+    EvalState,
+    HumanReviewState,
+    total=False,
+):
+    db_write_status: str
+    last_success_node: str
+    route: str
+```
+
+**Codex 注意：**
+
+* 把现在所有用到的字段整理归类到这些子 State 里；
+* 避免到处用 `state["xxx"]` 的魔法字符串，尽量统一命名；
+* 不改动字段含义，只做结构归类和类型声明。
+
+前端 TS 里的 `FactorAgentState` 类型保持和这里对齐（你现在已经有一版 TS 声明，Codex 需要同步更新）。
+
+---
+
+## 5. 节点逻辑模块化改造
+
+### 5.1 把大块逻辑拆到 `domain/*.py`
+
+**目标：**节点函数只是 State ↔ domain 函数的“适配层”，真正的业务能力在 `domain` 里。
+
+**示意：**
+
+```python
+# domain/logic.py
+from ..state import FactorAgentState
+
+def generate_logic(state: FactorAgentState) -> FactorAgentState:
+    # 调 LLM 生成逻辑描述，写回 logic_spec 等
+    ...
+    return {
+        "logic_spec": "...",
+        "logic_prompt": "...",
+    }
+
+def logic_node(state: FactorAgentState) -> FactorAgentState:
+    return generate_logic(state)
+```
+
+```python
+# domain/codegen.py
+from ..state import FactorAgentState
+
+def generate_code(state: FactorAgentState) -> FactorAgentState:
+    # 调 LLM / 工具生成因子代码
+    ...
+    return {
+        "factor_code": "...",
+        "code_prompt": "...",
+    }
+
+def codegen_node(state: FactorAgentState) -> FactorAgentState:
+    return generate_code(state)
+```
+
+```python
+# domain/eval.py
+def backfill_and_eval_node(state: FactorAgentState) -> FactorAgentState:
+    # 回测 + 评估，写 eval_metrics / db_write_status 等
+    ...
+```
+
+```python
+# domain/review.py
+from langgraph.types import Command
+from langgraph.types import interrupt
+
+def human_review_gate(state: FactorAgentState) -> Command:
+    # 你现有的 interrupt 逻辑，搬到这里
+    ...
+```
+
+**要求：**
+
+* 所有大块逻辑都抽成独立函数，便于以后：
+
+  * 直接在别的服务里调用（不走 LangGraph）；
+  * 或给它们再包一个小 graph 单独暴露。
+
+---
+
+## 6.（可选）为单个能力准备“小 graph” 模板
+
+这一条可以先列为“后续可选任务”，不一定现在做：
+
+**目标：**如果以后要单独暴露“逻辑生成 agent”、“代码生成 agent”，能快速起一个小 graph。
+
+**模板要求：**
+
+```python
+# factor_agent/small_graphs.py
+from langgraph.graph import StateGraph
+from .state import LogicState, CodeGenState
+from .domain.logic import logic_node
+from .domain.codegen import codegen_node
+
+logic_builder = StateGraph(LogicState)
+logic_builder.add_node("logic", logic_node)
+logic_builder.add_edge("__start__", "logic")
+logic_builder.add_edge("logic", "__end__")
+logic_graph = logic_builder.compile(checkpointer=...)  # 可以是简单 MemorySaver
+
+codegen_builder = StateGraph(CodeGenState)
+codegen_builder.add_node("codegen", codegen_node)
+codegen_builder.add_edge("__start__", "codegen")
+codegen_builder.add_edge("codegen", "__end__")
+codegen_graph = codegen_builder.compile(checkpointer=...)
+```
+
+后续再根据需要：
+
+* 在 API 层新增 `/api/logic_agent` / `/api/codegen_agent`；
+* 复用 CopilotKit 的同一套 runtime，只是 agent 名字不同。
+
+---
+
+## 7. 验收 checklist（给你和 Codex 对齐）
+
+1. **Graph 统一：**
+
+   * [ ] `factor_agent/graph.py` 存在，并导出 `graph`。
+   * [ ] API / CopilotKit 路由不再自己定义 graph，只是 import。
+   * [ ] CLI 调试也从这里 import `graph`。
+
+2. **命令行调试：**
+
+   * [ ] `poetry run python -m factor_agent.cli_debug` 能跑通完整流程。
+   * [ ] 若 workflow 中有 `interrupt`，在 CLI 能看到 payload & 正常 resume。
+
+3. **State 归类：**
+
+   * [ ] `state.py` 中有清晰的 `LogicState` / `CodeGenState` / `EvalState` / `HumanReviewState` / `FactorAgentState`。
+    LogicState = {"logic_spec": "...", "logic_prompt": "..."}
+    CodeGenState = {"factor_code": "...", "code_prompt": "..."}
+    EvalState = {"eval_metrics": {...}}
+    HumanReviewState = {"human_review_status": "approved", "retry_count": 1}
+
+    FactorAgentState = 以上所有键的并集（同一层）
+
+   * [ ] 所有节点只读写自己需要的字段，字段命名和前端 TS 类型对齐。
+
+4. **逻辑模块化：**
+
+   * [ ] 逻辑生成、代码生成、评估、人审等核心逻辑在 `domain/*.py` 中有对应函数。
+   * [ ] graph 节点本身比较“薄”，主要工作是调用这些 domain 函数。
+
+5. **前端兼容：**
+
+   * [ ] 原有的 `<CopilotKit runtimeUrl="/api/copilotkit" agent="factor_agent">` 不需要改。
+   * [ ] `useCoAgent<FactorAgentState>` 仍能拿到和之前语义一致的字段（只是类型结构更清晰）。
+
+---
+
+你可以把上面这份直接贴给 Codex，当成“重构任务说明书”。
+如果 Codex 实现过程中某一步有争议（比如 checkpointer 换不换、是否现在就加小 graph），你可以随时把它生成的代码或方案贴回来，我可以帮你做 code review 和进一步简化。
