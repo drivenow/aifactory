@@ -2,30 +2,53 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Tuple
+from pydantic import BaseModel, Field
+from typing import Any, Dict, Tuple, Optional
 
-from ..state import FactorAgentState
+from ..state import FactorAgentState, ViewBase, HumanReviewStatus
+
+class HumanReviewView(ViewBase):
+    """
+    人审相关视图：构造前端需要的 payload 字段
+    """
+    factor_code: str = ""
+    retry_count: int = 0
+    ui_request: Optional[Dict[str, Any]]      # 后端发起的人审请求 payload
+    ui_response: Optional[Dict[str, Any]]     # 前端回传的人审结果 payload
+    human_review_status: HumanReviewStatus    # 人审状态：pending/edited/approved/rejected
+    human_edits: Optional[str]                # 人工修改后的代码
+    should_interrupt: bool = True   # 是否进入 HITL 中断（诊断/前端显示）
+
+    @classmethod
+    @ViewBase._wrap_from_state("HumanReviewView.from_state")
+    def from_state(cls, state: FactorAgentState) -> "HumanReviewView":
+        return cls(
+            factor_code=state.get("factor_code") or "",
+            retry_count=int(state.get("retry_count") or 0),
+            ui_request=state.get("ui_request"),
+            ui_response=state.get("ui_response"),
+            human_review_status=state.get("human_review_status"),
+            human_edits=state.get("human_edits"),
+            should_interrupt=state.get("should_interrupt", False),
+        )
+
 
 
 def build_human_review_request(state: FactorAgentState) -> Dict[str, Any]:
     """
     构造人审请求 payload，交给前端渲染 CodeReviewPanel。
-
-    前端目前依赖字段：
-    - type: "code_review"
-    - title: 标题
-    - code: 当前因子代码
-    - actions: ["approve", "edit", "reject"]
-    - retry_count: 当前已重试次数
     """
+    view = HumanReviewView.from_state(state)
+
     req: Dict[str, Any] = {
         "type": "code_review",
         "title": "Review generated factor code",
-        "code": state.get("factor_code", "") or "",
-        "actions": ["approve", "edit", "reject"],
-        "retry_count": int(state.get("retry_count", 0)),
+        "code": view.factor_code,
+        "actions": str(HumanReviewStatus.__args__),
+        "retry_count": view.retry_count,
     }
     return req
+
 
 
 def normalize_review_response(raw: Any) -> Tuple[Dict[str, Any], str, str | None]:

@@ -2,32 +2,34 @@
 from __future__ import annotations
 
 from typing import Dict, Any
+from pydantic import BaseModel, Field
 
+from ..state import FactorAgentState, ViewBase
 from ..tools import mock_evals
 
 
-def compute_eval_metrics() -> Dict[str, Any]:
-    """
-    使用 mock_evals 模块生成因子评价指标。
+class EvalView(ViewBase):
+    factor_name: str = "factor"
+    eval_metrics: Dict[str, Any] = Field(default_factory=dict)
 
-    这里只是 mock，方便前端展示图表：
-    - ic
-    - turnover
-    - group_perf
-    """
+    @classmethod
+    @ViewBase._wrap_from_state("EvalView.from_state")
+    def from_state(cls, state: FactorAgentState) -> "EvalView":
+        return cls(
+            factor_name=state.get("factor_name") or "factor",
+            eval_metrics=state.get("eval_metrics") or {},
+        )
+
+
+def compute_eval_metrics(state: FactorAgentState) -> Dict[str, Any]:
+    view = EvalView.from_state(state)
     ic = mock_evals.factor_ic_mock()
     to = mock_evals.factor_turnover_mock()
     gp = mock_evals.factor_group_perf_mock()
-    metrics = {"ic": ic, "turnover": to, "group_perf": gp}
-    return metrics
+    return {"ic": ic, "turnover": to, "group_perf": gp}
 
 
-def write_factor_and_metrics(name: str, metrics: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    将因子与评价结果“写入数据库”（mock）。
-
-    返回值示例：
-    - {"status": "success"} / {"status": "failed"}
-    """
-    res = mock_evals.write_factor_and_metrics_mock(name, metrics)
-    return res
+def write_factor_and_metrics(state: FactorAgentState) -> Dict[str, Any]:
+    view = EvalView.from_state(state)
+    metrics = view.eval_metrics
+    return mock_evals.write_factor_and_metrics_mock(view.factor_name, metrics)      

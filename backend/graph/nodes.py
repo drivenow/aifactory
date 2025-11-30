@@ -1,13 +1,11 @@
 # backend/graph/nodes.py
 from __future__ import annotations
 
-from typing import Dict, Any, Optional
-
-from pydantic import BaseModel, Field
+from typing import Dict, Any, Optional, List
 from langgraph.graph import END
 from langgraph.types import Command, interrupt
 
-from .state import FactorAgentState
+from .state import FactorAgentState, FactorAgentStateModel
 from .domain.logic import extract_spec_and_name
 from .domain.codegen import (
     generate_factor_code_from_spec,
@@ -17,70 +15,7 @@ from .domain.codegen import (
 from .domain.eval import compute_eval_metrics, write_factor_and_metrics
 from .domain.review import build_human_review_request, normalize_review_response
 
-RETRY_MAX = 5  # 超过该次数强制进入 HITL
-
-
-# -------------------------
-# Pydantic action schemas（作为结构文档/调试用）
-# -------------------------
-
-class IntentAction(BaseModel):
-    """意图抽取动作输出：因子名与约束"""
-    human_input: bool = False
-    message: Optional[str] = None
-    factor_name: Optional[str] = None
-    constraints: Dict[str, Any] = Field(default_factory=dict)
-
-
-class CodeGenAction(BaseModel):
-    """代码生成动作输出：模板化因子代码与反思备注"""
-    human_input: bool = False
-    message: Optional[str] = None
-    factor_code: Optional[str] = None
-    reflect_notes: Optional[str] = None
-
-
-class DryRunResult(BaseModel):
-    """试运行结果：标准化执行输出"""
-    ok: bool
-    stdout: str = ""
-    stderr: str = ""
-    traceback: str = ""
-
-
-class SemanticCheckResult(BaseModel):
-    """语义一致性检查：是否符合用户描述/约束"""
-    ok: bool
-    diffs: list[str] = Field(default_factory=list)
-    reason: Optional[str] = None
-
-
-class HumanReviewAction(BaseModel):
-    """人审结果：审批/编辑/驳回"""
-    status: str  # approved/edited/rejected
-    edited_code: Optional[str] = None
-
-
-class BackfillAction(BaseModel):
-    """历史回填动作输出：预览统计与任务 ID"""
-    ok: bool
-    job_id: Optional[str] = None
-    preview_stats: Dict[str, Any] = Field(default_factory=dict)
-
-
-class EvalAction(BaseModel):
-    """评价动作输出：各项评价指标"""
-    ok: bool
-    metrics: Dict[str, Any] = Field(default_factory=dict)
-
-
-class PersistAction(BaseModel):
-    """入库动作输出：目标地址与写入行数"""
-    ok: bool
-    uri: Optional[str] = None
-    rows_written: int = 0
-
-
+RETRY_MAX = 5
 # -------------------------
 # Retry routing helper
 # -------------------------
@@ -90,22 +25,11 @@ def _route_retry_or_hitl(
     update: Dict[str, Any],
     target_if_retry: str = "gen_code_react",
 ) -> Command:
-    """
-    统一的重试/HITL 路由策略
-
-    - retry_count +1
-    - retry_count >= RETRY_MAX 时强制进入 HITL（goto human_review_gate）
-    - 否则跳转 target_if_retry
-    """
     rc = int(state.get("retry_count", 0)) + 1
 
-    base_update = {
-        **update,
-        "retry_count": rc,
-    }
+    base_update = {**update, "retry_count": rc}
 
     if rc >= RETRY_MAX:
-        # 强制进入 HITL
         return Command(
             goto="human_review_gate",
             update={
@@ -132,6 +56,8 @@ def collect_spec(state: FactorAgentState) -> Dict[str, Any] | Command:
     - 从 state.user_spec 或 messages[-1] 中提取描述
     - 因子名默认为 "factor"
     """
+    print(state)
+    # raise Exception()
     spec, name = extract_spec_and_name(state)
 
     print(
@@ -150,29 +76,16 @@ def collect_spec(state: FactorAgentState) -> Dict[str, Any] | Command:
 
 
 def gen_code_react(state: FactorAgentState) -> Dict[str, Any] | Command:
-    """
-    按模板生成因子代码（可以在这里替换为 ReAct 代理等更复杂的实现）
-
-    - 使用 domain.codegen.generate_factor_code_from_spec
-    - 失败时走统一重试/HITL 策略
-    """
     try:
-        spec = state.get("user_spec") or ""
-        if not spec:
-            raise ValueError("missing user_spec in state")
-
-        name = state.get("factor_name") or "factor"
-        code = generate_factor_code_from_spec(name, spec)
+        code = generate_factor_code_from_spec(state)
 
         print(
             f"[DBG] gen_code_react thread={state.get('thread_id')} "
             f"code_len={len(code) if isinstance(code, str) else 0}"
         )
 
-        action = CodeGenAction(factor_code=code)
-
         return {
-            "factor_code": action.factor_code,
+            "factor_code": code,
             "last_success_node": "gen_code_react",
             "error": None,
             "route": "dryrun",
@@ -193,31 +106,22 @@ def gen_code_react(state: FactorAgentState) -> Dict[str, Any] | Command:
 
 
 def dryrun(state: FactorAgentState) -> Dict[str, Any] | Command:
-    """
-    沙盒试运行 `run_factor` 入口，成功则进入语义检查，失败则走重试/HITL。
-    """
-    code = state.get("factor_code", "") or ""
-
-    result = run_factor_dryrun(code)
+    result = run_factor_dryrun(state)
     success = bool(result.get("success"))
 
     print(
         f"[DBG] dryrun thread={state.get('thread_id')} "
-        f"success={success} retry_count={state.get('retry_count')}"
+        f"success={success} retry_count={state.get('retry_count', 0)}"
     )
 
     if success:
         return {
-            "dryrun_result": {
-                "success": True,
-                "stdout": result.get("stdout", ""),
-            },
+            "dryrun_result": {"success": True, "stdout": result.get("stdout", "")},
             "last_success_node": "dryrun",
             "error": None,
             "route": "semantic_check",
         }
 
-    # 失败：写入错误信息 & 统一路由
     return _route_retry_or_hitl(
         state,
         {
@@ -234,19 +138,11 @@ def dryrun(state: FactorAgentState) -> Dict[str, Any] | Command:
 
 
 def semantic_check(state: FactorAgentState) -> Dict[str, Any] | Command:
-    """
-    语义一致性检查：要求 spec、code 存在且 dryrun 成功。
-    """
-    spec = state.get("user_spec", "") or ""
-    code = state.get("factor_code", "") or ""
-    dry_ok = bool(state.get("dryrun_result", {}).get("success"))
+    check_result, check_detail = is_semantic_check_ok(state)
 
-    ok = is_semantic_check_ok(spec, code, dry_ok)
-    result = SemanticCheckResult(ok=ok)
+    print(f"[DBG] semantic_check thread={state.get('thread_id')} ok={check_result} detail={check_detail}")
 
-    print(f"[DBG] semantic_check thread={state.get('thread_id')} ok={result.ok}")
-
-    if result.ok:
+    if check_result:    
         return {
             "semantic_check": {"pass": True},
             "last_success_node": "semantic_check",
@@ -349,13 +245,10 @@ def human_review_gate(state: FactorAgentState) -> Command:
 
 
 def backfill_and_eval(state: FactorAgentState) -> Dict[str, Any] | Command:
-    """
-    历史回填与评价（mock），完成后进入入库。
+    # 这里可以选择性全量校验一次（高价值节点）
+    FactorAgentStateModel.from_state(state)
 
-    - domain.eval.compute_eval_metrics 负责生成指标
-    """
-    metrics = compute_eval_metrics()
-
+    metrics = compute_eval_metrics(state)
     print(
         f"[DBG] backfill_and_eval thread={state.get('thread_id')} "
         f"metrics_keys={list(metrics.keys())}"
@@ -370,13 +263,7 @@ def backfill_and_eval(state: FactorAgentState) -> Dict[str, Any] | Command:
 
 
 def write_db(state: FactorAgentState) -> Dict[str, Any] | Command:
-    """
-    将评价结果入库（mock），然后进入结束节点。
-    """
-    name = state.get("factor_name") or "factor"
-    metrics = state.get("eval_metrics", {}) or {}
-
-    res = write_factor_and_metrics(name, metrics)
+    res = write_factor_and_metrics(state)
 
     print(
         f"[DBG] write_db thread={state.get('thread_id')} "
@@ -392,11 +279,6 @@ def write_db(state: FactorAgentState) -> Dict[str, Any] | Command:
 
 
 def finish(state: FactorAgentState) -> Dict[str, Any] | Command:
-    """
-    结束节点：简单跳转到 END，不再更新状态。
-
-    - graph 层面有显式 finish -> END 的边
-    """
     print(f"[DBG] finish thread={state.get('thread_id')}")
     return {}
 

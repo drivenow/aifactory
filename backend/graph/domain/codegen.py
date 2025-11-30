@@ -1,8 +1,10 @@
 # backend/graph/domain/codegen.py
 from __future__ import annotations
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+from pydantic import BaseModel, Field
 
+from ..state import FactorAgentState, ViewBase
 from ..tools.factor_template import (
     render_factor_code,
     simple_factor_body_from_spec,
@@ -10,7 +12,26 @@ from ..tools.factor_template import (
 from ..tools.sandbox_runner import run_code
 
 
-def generate_factor_code_from_spec(name: str, spec: str) -> str:
+class CodeGenView(ViewBase):
+    user_spec: str = ""
+    factor_name: str = "factor"
+    factor_code: str = ""
+    dryrun_result: Dict[str, Any] = Field(default_factory=dict)
+    semantic_check: Optional[Dict[str, Any]] = Field(default_factory=dict)  # 语义一致性：{pass, diffs, reason}
+
+    @classmethod
+    @ViewBase._wrap_from_state("CodeGenView.from_state")
+    def from_state(cls, state: FactorAgentState) -> "CodeGenView":
+        return cls(
+            user_spec=state.get("user_spec") or "",
+            factor_name=state.get("factor_name") or "factor",
+            factor_code=state.get("factor_code") or "",
+            dryrun_result=state.get("dryrun_result") or {},
+            semantic_check=state.get("semantic_check") or {},
+        )
+
+
+def generate_factor_code_from_spec(state: FactorAgentState) -> str:
     """
     根据用户的自然语言 spec 生成模板化因子代码。
 
@@ -18,34 +39,20 @@ def generate_factor_code_from_spec(name: str, spec: str) -> str:
     - simple_factor_body_from_spec: 生成函数 body
     - render_factor_code: 根据因子名 + 描述 + body 渲染出完整 Python 代码
     """
-    body = simple_factor_body_from_spec(spec)
-    code = render_factor_code(name, spec, body)
-    return code
+    view = CodeGenView.from_state(state)
+    body = simple_factor_body_from_spec(view.user_spec)
+    return render_factor_code(view.factor_name, view.user_spec, body)
 
 
-def run_factor_dryrun(code: str) -> Dict[str, Any]:
-    """
-    在沙盒中试运行因子代码，调用入口 run_factor。
-
-    返回值格式约定：
-    - success: bool
-    - stdout / stderr / traceback: 字符串
-    """
+def run_factor_dryrun(state: FactorAgentState) -> Dict[str, Any]:
+    view = CodeGenView.from_state(state)
     result = run_code(
-        code,
+        view.factor_code,
         entry="run_factor",
         args={"args": ["2020-01-01", "2020-01-10", ["A"]], "kwargs": {}},
     )
-    # 保持原始结构，节点里自己取字段
     return result
 
-
-def is_semantic_check_ok(spec: str, code: str, dryrun_success: bool) -> bool:
-    """
-    一个非常简单的“语义检查”规则：
-
-    - spec 非空
-    - code 非空
-    - dryrun_success 为 True
-    """
-    return bool(spec) and bool(code) and bool(dryrun_success)
+def is_semantic_check_ok(state: FactorAgentState) -> bool:
+    view = CodeGenView.from_state(state)
+    return view.semantic_check.get("pass", False), view.semantic_check
