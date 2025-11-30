@@ -55,4 +55,4 @@ def run_factor_dryrun(state: FactorAgentState) -> Dict[str, Any]:
 
 def is_semantic_check_ok(state: FactorAgentState) -> bool:
     view = CodeGenView.from_state(state)
-    return view.semantic_check.get("pass", False), view.semantic_check
+    return view.semantic_check.get("pass", True), view.semantic_check

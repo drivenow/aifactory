@@ -33,6 +33,14 @@ def _route_retry_or_hitl(
     """
     current = int(state.get("retry_count", 0))
 
+    # ✅ 只要当前代码是人 edit 后的版本，失败就不自动重试，直接回 HITL
+    if state.get("human_review_status") == "edit":
+        rc = int(state.get("retry_count", 0)) + 1
+        update["retry_count"] = rc
+        update["route"] = "human_review_gate"
+        update["should_interrupt"] = True
+        return Command(goto="human_review_gate", update=update)
+
     if current >= RETRY_MAX:
         return {
             **update,
@@ -207,17 +215,18 @@ def human_review_gate(state: FactorAgentState) -> Command:
     # ---- approve / edit 通过 ----
     if action_norm in ("approve", "edit"):
         final_code = edited_code or state.get("factor_code")
-
+        print(f"[DBG] human_review_gate approve/edit final_code={final_code}, retry_count reset to 0.")
         # 公共 update 字段
         base_update = {
             "ui_request": req,
             "ui_response": ui_resp,
-            "human_review_status": "edited" if action_norm == "edited" else "approved",
+            "human_review_status": "edit" if action_norm == "edit" else "approve",
             "human_edits": edited_code,
             "factor_code": final_code,
             "review_comment": review_comment,
             "last_success_node": "human_review_gate",
             "error": None,
+            "retry_count": 0, # 人工审核通过后，重置 retry_count
         }
 
         # ✅ 情况 1：用户只是 approve，不改代码 → 可以直通 backfill

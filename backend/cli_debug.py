@@ -1,4 +1,4 @@
-# backend/graph/cli_debug.py
+# backend/cli_debug.py
 """
 命令行调试入口（CLI runner）
 
