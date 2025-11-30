@@ -12,7 +12,7 @@ from ..tools.factor_template import (
 from ..tools.sandbox_runner import run_code
 from ..config import get_llm
 from ..prompts.factor_l3_py import PROMPT_FACTOR_L3_PY
-from langgraph.agents import create_react_agent
+from langchain.agents import create_agent
 from langchain_core.messages import SystemMessage, HumanMessage
 import re
 
@@ -42,9 +42,9 @@ class CodeGenView(ViewBase):
 
 def _build_l3_codegen_agent():
     llm = get_llm()
-    if not llm:
+    if (not llm) or (create_agent is None):
         return None
-    return create_react_agent(llm, tools=[l3_syntax_check, l3_mock_run])
+    return create_agent(llm, tools=[l3_syntax_check, l3_mock_run])
 
 
 _L3_AGENT = _build_l3_codegen_agent()
@@ -70,6 +70,7 @@ def _generate_l3_code_with_agent(view: CodeGenView) -> str:
     """使用 L3 专用 ReAct agent 生成 FactorBase 规范代码。"""
     agent = _L3_AGENT or _build_l3_codegen_agent()
     if agent is None:
+        print("[DBG] _generate_l3_code_with_agent fallback without llm")
         # 简单回退：生成一个占位因子，避免空结果影响流程
         return (
             "from L3FactorFrame.FactorBase import FactorBase\n\n"
@@ -104,6 +105,10 @@ def _generate_l3_code_with_agent(view: CodeGenView) -> str:
 
     out = agent.invoke({"messages": [sys, user]})
     msgs = out.get("messages") or []
+    print(
+        "[DBG] _generate_l3_code_with_agent agent invoked",
+        f"msgs={len(msgs)} last_error={(last_error[:80]+'...') if last_error else 'none'}",
+    )
     txt = _extract_last_assistant_content(msgs)
     return _strip_code_fences(txt).strip()
 

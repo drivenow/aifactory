@@ -1,5 +1,4 @@
 from typing import Dict
-from langchain_core.tools import tool
 
 
 FACTOR_TEMPLATE = """
@@ -56,18 +55,6 @@ def simple_factor_body_from_spec(user_spec: str) -> str:
             "        return price.pct_change(lookback)\n"
         )
     return "        raise NotImplementedError\n"
-
-
-@tool("render_factor")
-def render_factor_tool(factor_name: str, user_spec: str, factor_body: str) -> str:
-    """渲染完整因子代码 (factor_name, user_spec, factor_body) -> code"""
-    return render_factor_code(factor_name, user_spec, factor_body)
-
-
-@tool("propose_body")
-def propose_body_tool(user_spec: str) -> str:
-    """基于用户描述返回因子主体代码片段 (mock)"""
-    return simple_factor_body_from_spec(user_spec)
 """
 因子模板与渲染工具
 
