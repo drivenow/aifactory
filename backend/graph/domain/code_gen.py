@@ -12,14 +12,14 @@ from ..tools.factor_template import (
 from ..tools.sandbox_runner import run_code
 from ..config import get_llm
 from ..prompts.factor_l3_py import PROMPT_FACTOR_L3_PY
-from langchain.agents import create_agent
+from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import SystemMessage, HumanMessage
 import re
 
 # Tools
 from ..tools.l3_factor_tool import l3_syntax_check, l3_mock_run, _mock_run
 from ..tools.codebase_fs_tools import read_repo_file, list_repo_dir
-from ..tools.nonfactor_info import nonfactor_list, nonfactor_source
+from ..tools.nonfactor_info import get_formatted_nonfactor_info
 from ..state import FactorAgentState
 
 
@@ -78,19 +78,17 @@ def _build_l3_codegen_agent():
         return _L3_AGENT
 
     llm = get_llm()
-    if (not llm) or (create_agent is None):
+    if (not llm) or (create_react_agent is None):
         return None
     
     tools = [
-        nonfactor_list,
-        nonfactor_source,
         read_repo_file,
         list_repo_dir,
         l3_syntax_check,
         l3_mock_run,
     ]
     
-    _L3_AGENT = create_agent(llm, tools=tools)
+    _L3_AGENT = create_react_agent(llm, tools=tools)
     return _L3_AGENT
 
 
@@ -131,7 +129,11 @@ def _generate_l3_code_with_agent(view: CodeGenView) -> str:
     if sem and sem.reason and not last_error:
         last_error = "; ".join(sem.reason)
 
-    sys = SystemMessage(content=PROMPT_FACTOR_L3_PY)
+    # Inject NonFactor info into the prompt
+    formatted_prompt = PROMPT_FACTOR_L3_PY.format(
+        nonfactor_infos=get_formatted_nonfactor_info()
+    )
+    sys = SystemMessage(content=formatted_prompt)
 
     user_content = (
         f"因子类名: {view.factor_name}\n"
@@ -218,13 +220,13 @@ def is_semantic_check_ok(state: FactorAgentState) -> tuple[bool, Dict[str, Any]]
             last_error=last_err
         )
         # Return as dict to match state structure
-        return passed, result.dict()
+        return passed, result.model_dump()
 
     # pandas 模式保持兼容
     detail = view.semantic_check or SemanticCheckResult()
     # view.semantic_check might be a dict if coming from raw state, or object if processed
     if isinstance(detail, SemanticCheckResult):
-        return detail.passed, detail.dict()
+        return detail.passed, detail.model_dump()
     
     ok = detail.get("passed", detail.get("pass", True))
     return ok, detail

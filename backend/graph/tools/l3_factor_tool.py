@@ -54,6 +54,11 @@ class FactorBase:
         if not self._mock_ticks: return 0
         return self._mock_ticks[-1].get("Timestamp", 0)
 
+    def get_factor_instance(self, name):
+        if self.factorManager:
+            return self.factorManager.get_factor(name)
+        return None
+
 # Stub for FactorManager
 class FactorManagerStub:
     def __init__(self):
@@ -148,17 +153,40 @@ def mock_l3_modules(factor_base_cls):
     """
     # Create a dummy L3FactorFrame package
     l3_pkg = types.ModuleType("L3FactorFrame")
+    
+    # Mock FactorBase
     l3_fb_mod = types.ModuleType("L3FactorFrame.FactorBase")
     l3_fb_mod.FactorBase = factor_base_cls
     l3_pkg.FactorBase = l3_fb_mod
     
+    # Mock tools.DecimalUtil
+    l3_tools_pkg = types.ModuleType("L3FactorFrame.tools")
+    l3_decimal_mod = types.ModuleType("L3FactorFrame.tools.DecimalUtil")
+    l3_decimal_mod.isEqual = lambda a, b: abs(a - b) < 1e-9
+    l3_decimal_mod.notEqual = lambda a, b: abs(a - b) >= 1e-9
+    l3_tools_pkg.DecimalUtil = l3_decimal_mod
+    l3_pkg.tools = l3_tools_pkg
+
     old_modules = {}
-    keys_to_mock = ["L3FactorFrame", "L3FactorFrame.FactorBase"]
+    keys_to_mock = [
+        "L3FactorFrame", 
+        "L3FactorFrame.FactorBase", 
+        "L3FactorFrame.tools", 
+        "L3FactorFrame.tools.DecimalUtil"
+    ]
     
     for key in keys_to_mock:
         if key in sys.modules:
             old_modules[key] = sys.modules[key]
-        sys.modules[key] = l3_pkg if key == "L3FactorFrame" else l3_fb_mod
+        
+        if key == "L3FactorFrame":
+            sys.modules[key] = l3_pkg
+        elif key == "L3FactorFrame.FactorBase":
+            sys.modules[key] = l3_fb_mod
+        elif key == "L3FactorFrame.tools":
+            sys.modules[key] = l3_tools_pkg
+        elif key == "L3FactorFrame.tools.DecimalUtil":
+            sys.modules[key] = l3_decimal_mod
         
     try:
         yield

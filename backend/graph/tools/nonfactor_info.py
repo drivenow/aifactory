@@ -107,3 +107,20 @@ def nonfactor_source(name: str) -> Dict:
         "source": read_res.get("content"),
         "meta": meta_dict
     }
+
+def get_formatted_nonfactor_info() -> str:
+    """
+    Directly reads all NonFactor source codes and returns a formatted string
+    to be injected into the prompt.
+    """
+    lines = ["【Available NonFactors Source Code】"]
+    
+    for name, path in NONFACTOR_PATHS.items():
+        lines.append(f"\n--- {name} ---")
+        read_res = safe_fs.read_file_content(path)
+        if read_res.get("ok"):
+            lines.append(read_res.get("content", ""))
+        else:
+            lines.append(f"Error reading source: {read_res.get('error')}")
+            
+    return "\n".join(lines)
