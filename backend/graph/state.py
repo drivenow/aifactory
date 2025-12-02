@@ -1,10 +1,10 @@
 # backend/graph/state.py
 from __future__ import annotations
 from pydantic import BaseModel, Field
-from typing import TypedDict, Annotated, Optional, Dict, List, Any
+from typing import TypedDict, Optional, Dict, List, Any, Callable
+from typing_extensions import Annotated, Literal
 from functools import wraps
-from typing_extensions import Literal
-from langgraph.graph.message import add_messages  # 或你自定义聚合函数
+# from langgraph.graph.message import add_messages
 import traceback
 
 # =========================

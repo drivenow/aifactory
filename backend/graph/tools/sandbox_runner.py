@@ -2,8 +2,9 @@ import traceback
 import os
 import pandas as pd
 import numpy as np
+from typing import Optional
 
-def run_code(code: str, entry: str = "run_factor", args: dict | None = None) -> dict:
+def run_code(code: str, entry: str = "run_factor", args: Optional[dict] = None) -> dict:
     """执行代码并返回标准化结构"""
     try:
         # 创建单一命名空间

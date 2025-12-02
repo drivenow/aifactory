@@ -1,8 +1,8 @@
-# backend/graph/domain/code_gen.py
 from __future__ import annotations
 
 from typing import Dict, Any, Optional, List
-from pydantic import Field
+from enum import Enum
+from pydantic import Field, BaseModel
 
 from ..state import FactorAgentState, ViewBase
 from ..tools.factor_template import (
@@ -16,38 +16,82 @@ from langchain.agents import create_agent
 from langchain_core.messages import SystemMessage, HumanMessage
 import re
 
+# Tools
 from ..tools.l3_factor_tool import l3_syntax_check, l3_mock_run, _mock_run
+from ..tools.codebase_fs_tools import read_repo_file, list_repo_dir
+from ..tools.nonfactor_info import nonfactor_list, nonfactor_source
+from ..state import FactorAgentState
+
+
+class CodeMode(str, Enum):
+    PANDAS = "pandas"
+    L3_PY = "l3_py"
+
+
+class SemanticCheckResult(BaseModel):
+    passed: bool = True
+    reason: List[str] = []
+    last_error: str = ""
+
+
+class DryrunResult(BaseModel):
+    success: bool
+    traceback: Optional[str] = None
+    result_preview: Optional[Any] = None
 
 
 class CodeGenView(ViewBase):
     user_spec: str = ""
     factor_name: str = "factor"
     factor_code: str = ""
-    dryrun_result: Dict[str, Any] = Field(default_factory=dict)
-    semantic_check: Optional[Dict[str, Any]] = Field(default_factory=dict)  # 语义一致性：{pass, diffs, reason}
-    code_mode: str = "pandas"
+    code_mode: CodeMode = CodeMode.PANDAS
+    dryrun_result: DryrunResult = DryrunResult(success=True)
+    semantic_check: SemanticCheckResult = SemanticCheckResult()
 
     @classmethod
     @ViewBase._wrap_from_state("CodeGenView.from_state")
     def from_state(cls, state: FactorAgentState) -> "CodeGenView":
+        # helper to safe parse dict to pydantic
+        def _parse_dryrun(d):
+            if not d: return DryrunResult(success=True)
+            return DryrunResult(**d)
+
+        def _parse_semantic(d):
+            if not d: return SemanticCheckResult()
+            return SemanticCheckResult(**d)
+
         return cls(
             user_spec=state.get("user_spec") or "",
             factor_name=state.get("factor_name") or "factor",
             factor_code=state.get("factor_code") or "",
-            dryrun_result=state.get("dryrun_result") or {},
-            semantic_check=state.get("semantic_check") or {},
-            code_mode=state.get("code_mode") or "pandas",
+            dryrun_result=_parse_dryrun(state.get("dryrun_result")),
+            semantic_check=_parse_semantic(state.get("semantic_check")),
+            code_mode=state.get("code_mode") or CodeMode.PANDAS,
         )
 
 
+_L3_AGENT = None
+
 def _build_l3_codegen_agent():
+    global _L3_AGENT
+    if _L3_AGENT is not None:
+        return _L3_AGENT
+
     llm = get_llm()
     if (not llm) or (create_agent is None):
-        return None 
-    return create_agent(llm, tools=[l3_syntax_check, l3_mock_run])
-
-
-_L3_AGENT = _build_l3_codegen_agent()
+        return None
+    
+    tools = [
+        nonfactor_list,
+        nonfactor_source,
+        read_repo_file,
+        list_repo_dir,
+        l3_syntax_check,
+        l3_mock_run,
+    ]
+    
+    _L3_AGENT = create_agent(llm, tools=tools)
+    return _L3_AGENT
 
 
 def _extract_last_assistant_content(messages: List[Any]) -> str:
@@ -68,7 +112,7 @@ def _strip_code_fences(txt: str) -> str:
 
 def _generate_l3_code_with_agent(view: CodeGenView) -> str:
     """使用 L3 专用 ReAct agent 生成 FactorBase 规范代码。"""
-    agent = _L3_AGENT or _build_l3_codegen_agent()
+    agent = _build_l3_codegen_agent()
     if agent is None:
         print("[DBG] _generate_l3_code_with_agent fallback without llm")
         # 简单回退：生成一个占位因子，避免空结果影响流程
@@ -81,41 +125,41 @@ def _generate_l3_code_with_agent(view: CodeGenView) -> str:
             "        self.addFactorValue(0.0)\n"
         )
 
-    sem = view.semantic_check or {}
-    last_error = sem.get("last_error") or ""
-    if isinstance(sem.get("reason"), list) and not last_error:
-        last_error = "; ".join(str(x) for x in sem.get("reason"))
+    sem = view.semantic_check
+    last_error = sem.last_error if sem else ""
+    # If no explicit last_error but reasons exist, join them
+    if sem and sem.reason and not last_error:
+        last_error = "; ".join(sem.reason)
 
-    sys = SystemMessage(
-        content=(
-            PROMPT_FACTOR_L3_PY
-            + "\n\n工具使用要求：\n"
-            "- 至少调用一次 l3_syntax_check 做结构校验；必要时调用 l3_mock_run 做自检。\n"
-            "- 禁止输出工具日志或解释，最终只输出完整的 Python 源代码，不要使用 ``` 包裹。\n"
+    sys = SystemMessage(content=PROMPT_FACTOR_L3_PY)
+
+    user_content = (
+        f"因子类名: {view.factor_name}\n"
+        f"因子需求描述: {view.user_spec}\n"
+    )
+    if last_error:
+         user_content += f"\n[上一轮错误摘要]\n{last_error[:2000]}\n"
+
+    user = HumanMessage(content=user_content)
+    
+    try:
+        out = agent.invoke({"messages": [sys, user]})
+        msgs = out.get("messages") or []
+        print(
+            "[DBG] _generate_l3_code_with_agent agent invoked",
+            f"msgs={len(msgs)} last_error={(last_error[:80]+'...') if last_error else 'none'}",
         )
-    )
-
-    user = HumanMessage(
-        content=(
-            f"因子类名: {view.factor_name}\n"
-            f"因子需求描述: {view.user_spec}\n"
-            f"上次错误摘要: {last_error[:1000] if last_error else '无'}\n"
-        )
-    )
-
-    out = agent.invoke({"messages": [sys, user]})
-    msgs = out.get("messages") or []
-    print(
-        "[DBG] _generate_l3_code_with_agent agent invoked",
-        f"msgs={len(msgs)} last_error={(last_error[:80]+'...') if last_error else 'none'}",
-    )
-    txt = _extract_last_assistant_content(msgs)
-    return _strip_code_fences(txt).strip()
+        txt = _extract_last_assistant_content(msgs)
+        return _strip_code_fences(txt).strip()
+    except Exception as e:
+        print(f"[DBG] Agent invoke failed: {e}")
+        return f"# Agent invoke failed: {e}\nclass {view.factor_name}(FactorBase):\n    pass"
 
 
 def generate_factor_code_from_spec(state: FactorAgentState) -> str:
     view = CodeGenView.from_state(state)
-    if view.code_mode == "l3_py":
+    # Handle string or Enum comparison
+    if view.code_mode == CodeMode.L3_PY or view.code_mode == "l3_py":
         return _generate_l3_code_with_agent(view)
 
     body = simple_factor_body_from_spec(view.user_spec)
@@ -124,11 +168,23 @@ def generate_factor_code_from_spec(state: FactorAgentState) -> str:
 
 def run_factor_dryrun(state: FactorAgentState) -> Dict[str, Any]:
     view = CodeGenView.from_state(state)
-    if view.code_mode == "l3_py":
+    if view.code_mode == CodeMode.L3_PY or view.code_mode == "l3_py":
         res = _mock_run(view.factor_code)
         if res.get("ok"):
-            return {"success": True, "result": res.get("result")}
-        return {"success": False, "traceback": res.get("error")}
+            # Map L3 result to stdout for display compatibility
+            val_preview = str(res.get("result"))
+            if len(val_preview) > 1000:
+                val_preview = val_preview[:1000] + "... (truncated)"
+            return {
+                "success": True, 
+                "result": res.get("result"),
+                "stdout": f"[L3 Mock Result]\n{val_preview}"
+            }
+        return {
+            "success": False, 
+            "traceback": res.get("error"),
+            "stderr": res.get("error")
+        }
 
     return run_code(
         view.factor_code,
@@ -136,22 +192,61 @@ def run_factor_dryrun(state: FactorAgentState) -> Dict[str, Any]:
         args={"args": ["2020-01-01", "2020-01-10", ["A"]], "kwargs": {}},
     )
 
-def is_semantic_check_ok(state: FactorAgentState) -> bool:
+
+def is_semantic_check_ok(state: FactorAgentState) -> tuple[bool, Dict[str, Any]]:
     view = CodeGenView.from_state(state)
-    # pandas 模式保持兼容：默认通过，除非显式标记失败
-    if view.code_mode != "l3_py":
-        return view.semantic_check.get("pass", True), view.semantic_check
+    
+    if view.code_mode == CodeMode.L3_PY or view.code_mode == "l3_py":
+        reasons = []
+        code = view.factor_code
+        
+        if "FactorBase" not in code:
+            reasons.append("未继承 FactorBase。")
+        if "def calculate" not in code:
+            reasons.append("未定义 calculate 方法。")
+        if "addFactorValue" not in code:
+            reasons.append("未调用 addFactorValue 写回因子值。")
+        
+        # Check inheritance from syntax check tool if needed, but simple string check is fast
+        
+        passed = len(reasons) == 0
+        last_err = "; ".join(reasons) if reasons else ""
+        
+        result = SemanticCheckResult(
+            passed=passed,
+            reason=reasons,
+            last_error=last_err
+        )
+        # Return as dict to match state structure
+        return passed, result.dict()
 
-    detail = view.semantic_check or {"pass": True}
-    ok = detail.get("pass", True)
-    return ok, (detail if detail else {"pass": ok})
+    # pandas 模式保持兼容
+    detail = view.semantic_check or SemanticCheckResult()
+    # view.semantic_check might be a dict if coming from raw state, or object if processed
+    if isinstance(detail, SemanticCheckResult):
+        return detail.passed, detail.dict()
+    
+    ok = detail.get("passed", detail.get("pass", True))
+    return ok, detail
 
 
-if __name__ == "__main__":
-    state = {
-        "user_spec": "Compute 5-day moving average of close price",
-        "factor_name": "MovingAvgFactor",
-        "code_mode": "l3_py",
-    }
-    code = generate_factor_code_from_spec(state)
-    print(code)
+if __name__=="__main__":
+    # 生成一个l3_factor类的因子
+    # 构造一个测试用的 state
+    test_state = FactorAgentState(
+        user_spec="请计算档期主买主卖的订单不均衡",
+        factor_name="AskBidRate",
+        code_mode="l3_py"
+    )
+
+    # 调用生成函数
+    generated_code = generate_factor_code_from_spec(test_state)
+    print("=== 生成的 L3 因子代码 ===")
+    print(generated_code)
+
+    # 可选：将生成的代码写回 state 并做语义检查
+    test_state["factor_code"] = generated_code
+    passed, semantic_result = is_semantic_check_ok(test_state)
+    print("\n=== 语义检查结果 ===")
+    print("通过:", passed)
+    print("详情:", semantic_result)
