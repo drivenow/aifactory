@@ -15,7 +15,7 @@ class HumanReviewView(ViewBase):
     retry_count: int = 0
     ui_request: Optional[Dict[str, Any]]      # 后端发起的人审请求 payload
     ui_response: Optional[Dict[str, Any]]     # 前端回传的人审结果 payload
-    human_review_status: Optional[HumanReviewStatus]    # 人审状态：pending/edit/approve/rejecte
+    human_review_status: Optional[HumanReviewStatus]    # 人审状态：pending/edit/approve/reject
     human_edits: Optional[str]                # 人工修改后的代码
     should_interrupt: bool = True   # 是否进入 HITL 中断（诊断/前端显示）
 
@@ -29,7 +29,7 @@ class HumanReviewView(ViewBase):
             ui_response=state.get("ui_response"),
             human_review_status=state.get("human_review_status"),
             human_edits=state.get("human_edits"),
-            should_interrupt=state.get("should_interrupt", False),
+            should_interrupt=state.get("should_interrupt", True),
         )
 
 
@@ -62,7 +62,7 @@ def normalize_review_response(raw: Any) -> Tuple[Dict[str, Any], str, Optional[s
 
     返回（保持原签名不变）：
     - ui_resp: dict 形式的标准化对象
-    - status: "approve"/"edit"/"rejecte"/"review" 之一（异常时默认为 "rejecte"）
+    - status: "approve"/"edit"/"reject"/"review" 之一（异常时默认为 "reject"）
     - edited_code: 如存在则返回，否则为 None
     """
     ui_resp = raw
@@ -75,7 +75,7 @@ def normalize_review_response(raw: Any) -> Tuple[Dict[str, Any], str, Optional[s
             ui_resp = {"status": ui_resp}
 
     if not isinstance(ui_resp, dict):
-        ui_resp = {"status": "rejecte"}
+        ui_resp = {"status": "reject"}
 
     # 2) 新协议优先：action/payload
     if ui_resp.get("action"):
@@ -85,14 +85,11 @@ def normalize_review_response(raw: Any) -> Tuple[Dict[str, Any], str, Optional[s
         # action 归一化成 status
         action_map = {
             "approve": "approve",
-            "reject": "rejecte",
+            "reject": "reject",
             "review": "review",
             "edit": "edit",
-            "approve": "approve",
-            "rejecte": "rejecte",
-            "edit": "edit",
         }
-        status = action_map.get(action, "rejecte")
+        status = action_map.get(action, "reject")
 
         if isinstance(payload, dict):
             edited_code = payload.get("edited_code")
@@ -102,12 +99,13 @@ def normalize_review_response(raw: Any) -> Tuple[Dict[str, Any], str, Optional[s
         return ui_resp, status, edited_code
 
     edited_code = ui_resp.get("edited_code") or ui_resp.get("factor_code")
+    status = ui_resp.get("status")
 
     if not isinstance(status, str):
-        status = "rejecte"
+        status = "reject"
 
     # review 也是合法状态（新加）
-    if status not in ("approve", "edit", "rejecte", "review"):
-        status = "rejecte"
+    if status not in ("approve", "edit", "reject", "review"):
+        status = "reject"
 
     return ui_resp, status, edited_code

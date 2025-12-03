@@ -16,13 +16,13 @@
 - 当 interrupt payload 为 {"type": "code_review", ...} 时:
   - CLI 会提示你选择:
       1) approve
-      2) rejecte
+      2) reject
       3) review (只写审核意见)
       4) edit   (编辑代码)
   - 然后返回给后端的 resume 值为:
       {
         "type": "code_review",
-        "action": "approve" | "rejecte" | "review" | "edit",
+        "action": "approve" | "reject" | "review" | "edit",
         "payload": {
           "review_comment"?: str,
           "edited_code"?: str
@@ -80,7 +80,7 @@ def _prompt_code_review(payload: Dict[str, Any]) -> Dict[str, Any]:
     返回与前端一致的新协议:
     {
       "type": "code_review",
-      "action": "approve" | "rejecte" | "review" | "edit",
+      "action": "approve" | "reject" | "review" | "edit",
       "payload": {
         "review_comment"?: str,
         "edited_code"?: str
@@ -102,7 +102,7 @@ def _prompt_code_review(payload: Dict[str, Any]) -> Dict[str, Any]:
     while True:
         print("请选择操作:")
         print("  1) approve  （通过，进入回填+评价）")
-        print("  2) rejecte   （拒绝，直接结束）")
+        print("  2) reject   （拒绝，直接结束）")
         print("  3) review   （只写审核意见，交给模型再生成）")
         print("  4) edit     （直接修改代码，再继续流程）")
         choice = input("> ").strip()
@@ -115,11 +115,11 @@ def _prompt_code_review(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "payload": {},
             }
 
-        # 2) rejecte
+        # 2) reject
         if choice == "2":
             return {
                 "type": "code_review",
-                "action": "rejecte",
+                "action": "reject",
                 "payload": {},
             }
 

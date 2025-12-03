@@ -24,7 +24,7 @@ export type FactorAgentState = {
   retry_count?: number;
   should_interrupt?: boolean;
 
-  human_review_status?: "pending" | "approve" | "edit" | "rejecte" | "review";
+  human_review_status?: "pending" | "approve" | "edit" | "reject" | "review";
   review_comment?: string; // ✅ 新增字段（后端也有）
 
   eval_metrics?: any;
@@ -110,7 +110,7 @@ function Inner() {
               /**
                * ✅ 新协议边界：
                * resolve({ type, action, payload })
-               * action: approve | rejecte | review | edit
+               * action: approve | reject | review | edit
                * payload: { review_comment? , edited_code? }
                */
 
@@ -124,7 +124,7 @@ function Inner() {
               onReject={() =>
                 hitlResolve({
                   type: "code_review",
-                  action: "rejecte",
+                  action: "reject",
                 })
               }
 

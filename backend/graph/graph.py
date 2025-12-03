@@ -10,16 +10,16 @@ from backend.graph import nodes
 
 def build_graph() -> StateGraph:
     """
-    构建工作流图（纯 Command 路由 + HITL interrupt）
+    构建工作流图（纯 route 字段 + conditional edges 控流，HITL interrupt）
 
     入口：collect_spec_from_messages
-    路由：所有中间跳转由各节点返回 Command(goto=..., update=...) 控制
+    路由：所有中间跳转由各节点返回 route 字段控制
     终点：finish → END（显式加边，便于可视化与稳定性）
 
     约定：
-    - 每个节点都返回 Command(goto=..., update=...)
+    - 每个节点都返回更新后的 state dict，并写入 route
     - human_review_gate 使用 interrupt(...) 触发 HITL 中断，LangGraph/AG-UI 会负责 resume
-    - 图层只声明入口和 finish->END 的边，其他跳转都由 Command 决定
+    - 图层只声明入口和 finish->END 的边，其他跳转都由 conditional edges 决定
     """
     g = StateGraph(FactorAgentState)
 
@@ -48,9 +48,9 @@ def build_graph() -> StateGraph:
     主干最好静态边，异常/重试用 Command 。
     gen_code_react / dryrun / semantic_check
 
-    必须用 Command （HITL 恢复后动态分叉）。
-    human_review_gate
-
+    一个简单的选型口诀（本图采用 route+conditional edges）：
+    - 主干：collect_spec_from_messages / backfill_and_eval / write_db / finish 使用静态边
+    - 分支：gen_code_react / dryrun / semantic_check / human_review_gate 由 route 控制跳转
     """
     g.set_entry_point("collect_spec_from_messages")
     g.add_edge("collect_spec_from_messages", "gen_code_react")
@@ -102,5 +102,4 @@ if __name__ == "__main__":
         print("流程图已保存为 workflow.png")
     except Exception as e:
         print("[WARN] draw graph failed:", e)
-
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Dict, Any, Optional, List
 from langgraph.graph import END
-from langgraph.types import Command, interrupt
+from langgraph.types import interrupt
 
 from .state import FactorAgentState, FactorAgentStateModel, HumanReviewStatus
 from .domain import (
@@ -38,10 +38,12 @@ def _route_retry_or_hitl(
     # ✅ 只要当前代码是人 edit 后的版本，失败就不自动重试，直接回 HITL
     if state.get("human_review_status") == "edit":
         rc = int(state.get("retry_count", 0)) + 1
-        update["retry_count"] = rc
-        update["route"] = "human_review_gate"
-        update["should_interrupt"] = True
-        return Command(goto="human_review_gate", update=update)
+        return {
+            **update,
+            "retry_count": rc,
+            "route": "human_review_gate",
+            "should_interrupt": True,
+        }
 
     if current >= RETRY_MAX:
         return {
@@ -184,26 +186,26 @@ def semantic_check(state: FactorAgentState) -> Dict[str, Any]:
     return update2
 
 
-def human_review_gate(state: FactorAgentState) -> Command:
+def human_review_gate(state: FactorAgentState) -> Dict[str, Any]:
     """
     人工审核节点（HITL）
     - 发起 interrupt，把 req 传出去
     - 恢复后统一解析前端回传：
       新协议 action+payload 优先，旧协议 status 兜底
     """
-    # 默认不中断，便于测试/无前端环境自动通过；如果没有 ui_response 也自动通过
-    if not state.get("should_interrupt", False) or state.get("ui_response") is None:
+    # 默认需要中断；仅当 explicitly 关闭 should_interrupt 时自动通过
+    should_interrupt = state.get("should_interrupt", True)
+    if not should_interrupt:
         final_code = state.get("factor_code") or ""
-        return Command(
-            goto="backfill_and_eval",
-            update={
-                "human_review_status": "approve",
-                "factor_code": final_code,
-                "route": "backfill_and_eval",
-                "last_success_node": "human_review_gate",
-                "retry_count": 0,
-            },
-        )
+        return {
+            "human_review_status": "approve",
+            "factor_code": final_code,
+            "route": "backfill_and_eval",
+            "last_success_node": "human_review_gate",
+            "retry_count": 0,
+            "ui_request": state.get("ui_request"),
+            "ui_response": state.get("ui_response"),
+        }
 
     req = {
         "type": "code_review",
@@ -213,8 +215,11 @@ def human_review_gate(state: FactorAgentState) -> Command:
         "retry_count": int(state.get("retry_count", 0)),
     }
 
-    # 第一次进入：中断并把 req 发给前端
-    ui_resp_raw = interrupt(req)
+    # 第一次进入：中断并把 req 发给前端；如果已有响应则复用, 主要用于测试用例模拟中断
+    if state.get("ui_response") is None:
+        ui_resp_raw = interrupt(req)
+    else:
+        ui_resp_raw = state.get("ui_response")
 
     # 允许前端传 string/json/dict 等多形态
     ui_resp, status, edited_code = normalize_review_response(ui_resp_raw)
@@ -232,7 +237,7 @@ def human_review_gate(state: FactorAgentState) -> Command:
     if action is None:
         print(f"[DBG] human_review_gate old protocol status={status}")
 
-    action_norm = action or "reject"
+    action_norm = action or status or "reject"
     review_comment = payload.get("review_comment") if isinstance(payload, dict) else None
     edited_code = payload.get("edited_code") if isinstance(payload, dict) else edited_code
 
@@ -255,75 +260,60 @@ def human_review_gate(state: FactorAgentState) -> Command:
 
         # ✅ 情况 1：用户只是 approve，不改代码 → 可以直通 backfill
         if action_norm == "approve":
-            return Command(
-                goto="backfill_and_eval",
-                update={
-                    **base_update,
-                    "route": "backfill_and_eval",
-                },
-            )
+            return {
+                **base_update,
+                "route": "backfill_and_eval",
+            }
 
         # ✅ 情况 2：用户 edit 了代码 → 回到 dryrun 重新跑一遍
         if action_norm == "edit":
-            return Command(
-                goto="dryrun",
-                update={
-                    **base_update,
-                    "route": "dryrun",
-                    # 可选：把旧的 dryrun/semantic_check 结果清空或标记为过期
-                    "dryrun_result": {},
-                    "semantic_ok": False,
-                },
-            )
+            return {
+                **base_update,
+                "route": "dryrun",
+                # 可选：把旧的 dryrun/semantic_check 结果清空或标记为过期
+                "dryrun_result": {},
+                "semantic_ok": False,
+            }
 
     # ---- review 只给意见 → 回到 gen_code_react ----
     elif action_norm == "review":
         comment = (review_comment or "").strip()
         new_spec = (state.get("user_spec") or "") + f"\n\n[REVIEW COMMENT]\n{comment}"
-        return Command(
-            goto="gen_code_react",
-            update={
-                "user_spec": new_spec,
-                "human_review_status": "review",
-                "review_comment": comment,
-                "last_success_node": "human_review_gate",
-                "error": None,
-                "route": "gen_code_react",
-            },
-        )
+        return {
+            "user_spec": new_spec,
+            "human_review_status": "review",
+            "review_comment": comment,
+            "last_success_node": "human_review_gate",
+            "error": None,
+            "route": "gen_code_react",
+        }
 
     # ---- reject 结束 ----
-    elif action_norm == "rejecte":
-        return Command(
-            goto="finish",
-            update={
-                "ui_request": req,
-                "ui_response": ui_resp,
-                "human_review_status": "rejecte",
-                "review_comment": review_comment,
-                "last_success_node": "human_review_gate",
-                "error": None,
-                "route": "finish",
-            },
-        )
+    elif action_norm == "reject":
+        return {
+            "ui_request": req,
+            "ui_response": ui_resp,
+            "human_review_status": "reject",
+            "review_comment": review_comment,
+            "last_success_node": "human_review_gate",
+            "error": None,
+            "route": "finish",
+        }
     else:
         print(f"[DBG] human_review_gate invalid action={action_norm!r}")
         # ---- 兜底非法 action ----
-        return Command(
-            goto="finish",
-            update={
-                "ui_request": req,
-                "ui_response": ui_resp,
-                "human_review_status": "rejecte",
-                "review_comment": review_comment,
-                "last_success_node": "human_review_gate",
-                "error": {
-                    "node": "human_review_gate",
-                    "message": f"invalid ui_response action={action!r}",
-                },
-                "route": "finish",
+        return {
+            "ui_request": req,
+            "ui_response": ui_resp,
+            "human_review_status": "reject",
+            "review_comment": review_comment,
+            "last_success_node": "human_review_gate",
+            "error": {
+                "node": "human_review_gate",
+                "message": f"invalid ui_response action={action!r}",
             },
-    )
+            "route": "finish",
+        }
 
 
 
@@ -361,13 +351,13 @@ def write_db(state: FactorAgentState) -> Dict[str, Any] :
     }
 
 
-def finish(state: FactorAgentState) -> Dict[str, Any] | Command:
+def finish(state: FactorAgentState) -> Dict[str, Any]:
     print(f"[DBG] finish thread={state.get('thread_id')}")
     return {}
 
 
 """
-工作流节点实现（纯 Command 路由，方案 A）
+工作流节点实现（纯 route+conditional edges 控制）
 
 节点：
 - collect_spec_from_messages: 收集用户描述

@@ -2,7 +2,7 @@
 
 ## 当前实现（代码基线）
 - **LangGraph 路由**：StateGraph + MemorySaver；入口 `collect_spec_from_messages → gen_code_react → dryrun → semantic_check → human_review_gate → backfill_and_eval → write_db → finish`。路由依赖 `route` 字段 + conditional edges，`finish→END` 静态边，HITL 节点用 `Command` 中断恢复。
-- **重试/HITL**：`RETRY_MAX=3`；`_route_retry_or_hitl` 控制重试计数，`human_review_status=="edit"` 时失败直接回人审；`human_review_gate` 支持 `approve→backfill_and_eval`，`edit→dryrun`，`review→gen_code_react`，`rejecte→finish`，中断 payload 为 `{type:"code_review", actions: HumanReviewStatus}`。
+- **重试/HITL**：`RETRY_MAX=3`；`_route_retry_or_hitl` 控制重试计数，`human_review_status=="edit"` 时失败直接回人审；`human_review_gate` 支持 `approve→backfill_and_eval`，`edit→dryrun`，`review→gen_code_react`，`reject→finish`，中断 payload 为 `{type:"code_review", actions: HumanReviewStatus}`。
 - **State 形态**：`FactorAgentState` 为 TypedDict 聚合（非 MessagesState），含 `messages/route/retry_count/factor_code/dryrun_result/semantic_check/human_review_status/ui_request/ui_response/eval_metrics/db_write_status` 等；`should_interrupt` 默认 True 但未用于路由；无 artifacts/overwrite_fields/短摘要实现。
 - **代码生成**：`generate_factor_code_from_spec` 仅在有 LLM 时调用 `create_react_agent`（工具：`render_factor`/`propose_body`/`dryrun_code`），输出通过正则提取代码块；无 LLM 时回落 `simple_factor_body_from_spec` + 模板渲染。模板 `load_data` 返回静态 DataFrame。
 - **试跑/沙盒**：`run_code` 直接 `exec`，开放 `pandas/numpy/os/__builtins__`，无 AST 过滤、时间/资源/网络限制；`dryrun` 使用固定入参调用 `run_factor`。
