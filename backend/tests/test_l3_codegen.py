@@ -40,7 +40,7 @@ def test_l3_codegen_and_dryrun(monkeypatch):
         "user_spec": "最近3笔买卖盘价量比对比",
         "factor_name": "FactorTest",
         "code_mode": "l3_py",
-        "semantic_check": {},
+        "check_semantics": {},
     }
 
     code = code_gen.generate_factor_code_from_spec(state)
@@ -49,13 +49,13 @@ def test_l3_codegen_and_dryrun(monkeypatch):
     assert "addFactorValue" in code
     assert dummy_agent.invoked is True
 
-    # dryrun should succeed with mock runner
+    # run_factor_dryrun should succeed with mock runner
     run_res = code_gen.run_factor_dryrun({"factor_code": code, "code_mode": "l3_py"})
     assert run_res.get("success") is True
 
     # semantic check should pass
     ok, detail = code_gen.is_semantic_check_ok(
-        {"factor_code": code, "code_mode": "l3_py", "factor_name": "FactorTest", "semantic_check": {}}
+        {"factor_code": code, "code_mode": "l3_py", "factor_name": "FactorTest", "check_semantics": {}}
     )
     assert ok is True
     assert detail.get("pass") is True

@@ -17,7 +17,7 @@ class HumanReviewView(ViewBase):
     ui_response: Optional[Dict[str, Any]]     # 前端回传的人审结果 payload
     human_review_status: Optional[HumanReviewStatus]    # 人审状态：pending/edit/approve/reject
     human_edits: Optional[str]                # 人工修改后的代码
-    should_interrupt: bool = True   # 是否进入 HITL 中断（诊断/前端显示）
+    enable_interrupt: bool = True   # 是否进入 HITL 中断（诊断/前端显示）
 
     @classmethod
     @ViewBase._wrap_from_state("HumanReviewView.from_state")
@@ -29,7 +29,7 @@ class HumanReviewView(ViewBase):
             ui_response=state.get("ui_response"),
             human_review_status=state.get("human_review_status"),
             human_edits=state.get("human_edits"),
-            should_interrupt=state.get("should_interrupt", True),
+            enable_interrupt=state.get("enable_interrupt", True),
         )
 
 

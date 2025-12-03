@@ -156,7 +156,7 @@ state 初始大概是：
 {
   "messages": [HumanMessage("hi")],
   "route": "schedule",
-  "should_interrupt": False,
+  "enable_interrupt": False,
   "current_booking": {},
   "cart": [],
   "system_date": None
@@ -196,7 +196,7 @@ state 初始大概是：
 
 * 如果 human_input=true 且有 message
   → messages 变成 AIMessage(message)
-  → `should_interrupt=True`
+  → `enable_interrupt=True`
   → route 仍为 schedule
 
 * 否则（LLM 输出不合规）
@@ -210,7 +210,7 @@ state 初始大概是：
 每个阶段后都会走这个路由器：
 
 ```python
-if should_interrupt:
+if enable_interrupt:
     return "interrupt_node"
 else:
     return route
@@ -224,7 +224,7 @@ else:
 
 ### 3. interrupt_node（Human-in-the-loop）
 
-1. 先把 `should_interrupt=False` 避免重复
+1. 先把 `enable_interrupt=False` 避免重复
 
 2. 发事件 `interrupt`
 
@@ -251,7 +251,7 @@ else:
 4. 更新 passenger_name/email
 5. 判断齐不齐
 6. 齐了 → route="confirm"
-   缺 → should_interrupt=True → interrupt_node
+   缺 → enable_interrupt=True → interrupt_node
 
 ---
 
@@ -265,14 +265,14 @@ else:
 * `action="confirm"`
 
   * 发 booking summary
-  * should_interrupt=True（等用户 yes）
+  * enable_interrupt=True（等用户 yes）
 
 * `action="add_to_cart"`
 
   * 把 current_booking 加入 cart
   * 清空 current_booking
   * 然后问用户要不要再订 / 结束
-  * should_interrupt=True
+  * enable_interrupt=True
 
 * `action="complete"`
 
@@ -296,7 +296,7 @@ graph 完成
 
 ## 四、用一句话串起来
 
-> 这个 agent 用 **三段结构化 LLM 表单节点（schedule/contact/confirm）** 逐步收集信息、控制流程；每段如果需要用户回复就把 `should_interrupt=True`，路由到 `interrupt_node` 暂停等待；回填后再继续下一段；最后把订票加入 cart 并结束。
+> 这个 agent 用 **三段结构化 LLM 表单节点（schedule/contact/confirm）** 逐步收集信息、控制流程；每段如果需要用户回复就把 `enable_interrupt=True`，路由到 `interrupt_node` 暂停等待；回填后再继续下一段；最后把订票加入 cart 并结束。
 
 ---
 

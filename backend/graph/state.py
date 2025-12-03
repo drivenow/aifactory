@@ -14,9 +14,9 @@ import traceback
 # 路由枚举（与 graph 中的节点名保持一致）
 Route = Literal[
     "collect_spec_from_messages",
-    "gen_code_react",
-    "dryrun",
-    "semantic_check",
+    "generate_factor_code",
+    "run_factor_dryrun",
+    "check_semantics",
     "human_review_gate",
     "backfill_and_eval",
     "write_db",
@@ -130,7 +130,7 @@ class FactorAgentState(
 
     factor_code: Annotated[str, keep_last]          # 生成的因子代码（模板化）
     dryrun_result: Optional[Dict[str, Any]]   # 试运行结果：{success, stdout, stderr, traceback}
-    semantic_check: Optional[Dict[str, Any]]  # 语义一致性：{pass, diffs, reason}
+    check_semantics: Optional[Dict[str, Any]]  # 语义一致性：{pass, diffs, reason}
 
     """HumanReviewState 人审相关状态（HITL）"""
 
@@ -139,7 +139,7 @@ class FactorAgentState(
     human_review_status: Optional[HumanReviewStatus] = "pending"    # 人审状态：pending/edit/approve/reject
     review_comment: Optional[str] = None      # 人工审核的评论
     human_edits: Optional[str]                # 人工修改后的代码
-    should_interrupt: bool = True   # 是否进入 HITL 中断（诊断/前端显示）
+    enable_interrupt: bool = True   # 是否进入 HITL 中断（诊断/前端显示）
 
 
     """EvalState 回填 / 评估 / 入库"""
@@ -186,7 +186,7 @@ class FactorAgentStateModel(BaseModel):
 
     # ExecutionState
     dryrun_result: Dict[str, Any] = Field(default_factory=dict)
-    semantic_check: Dict[str, Any] = Field(default_factory=dict)
+    check_semantics: Dict[str, Any] = Field(default_factory=dict)
 
     # HumanReviewState
     ui_request: Dict[str, Any] = Field(default_factory=dict)
@@ -194,7 +194,7 @@ class FactorAgentStateModel(BaseModel):
     human_review_status: HumanReviewStatus = "pending"
     human_edits: Optional[str] = None
     review_comment: Optional[str] = None  # ✅ 新增
-    should_interrupt: bool = True
+    enable_interrupt: bool = True
 
     # EvalState
     backfill_job_id: Optional[str] = None

@@ -39,7 +39,7 @@ def simple_factor_body_from_spec(user_spec: str) -> str:
 
     说明：
     - 识别“滚动均值/MA”等关键词，返回相应计算逻辑
-    - 未识别时返回 `raise NotImplementedError`，便于触发 dryrun 失败与人审
+    - 未识别时返回 `raise NotImplementedError`，便于触发 run_factor_dryrun 失败与人审
     """
     s = user_spec.lower()
     if "moving average" in s or "ma" in s or "滚动均值" in s or "均值" in s:

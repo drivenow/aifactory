@@ -22,16 +22,16 @@ from .config import RETRY_MAX
 # Retry routing helper
 # -------------------------
 
-def _route_retry_or_hitl(
+def _route_retry_or_human_review(
     state: FactorAgentState,
     update: Dict[str, Any],
-    target_if_retry: str = "gen_code_react",
+    target_if_retry: str = "generate_factor_code",
 ) -> Dict[str, Any]:
     """
     根据 retry_count 路由到重试节点或 HITL 节点。
 
     - 如果 retry_count >= RETRY_MAX，进入 HITL 节点（默认 "human_review_gate"）
-    - 否则，进入重试节点（默认 "gen_code_react"）
+    - 否则，进入重试节点（默认 "generate_factor_code"）
     """
     current = int(state.get("retry_count", 0))
 
@@ -42,14 +42,14 @@ def _route_retry_or_hitl(
             **update,
             "retry_count": rc,
             "route": "human_review_gate",
-            "should_interrupt": True,
+            "enable_interrupt": True,
         }
 
     if current >= RETRY_MAX:
         return {
             **update,
             "retry_count": current,
-            "should_interrupt": True,
+            "enable_interrupt": True,
             "route": "human_review_gate",
         }
 
@@ -84,60 +84,60 @@ def collect_spec_from_messages(state: FactorAgentState) -> Dict[str, Any]:
         "code_mode": state.get("code_mode") or "pandas",
         "last_success_node": "collect_spec_from_messages",
         "error": None,
-        "route": "gen_code_react",
+        "route": "generate_factor_code",
     }
 
 
-def gen_code_react(state: FactorAgentState) -> Dict[str, Any]:
+def generate_factor_code(state: FactorAgentState) -> Dict[str, Any]:
     try:
         code = generate_factor_code_from_spec(state)
 
         print(
-            f"[DBG] gen_code_react thread={state.get('thread_id')} "
+            f"[DBG] generate_factor_code thread={state.get('thread_id')} "
             f"code_len={len(code) if isinstance(code, str) else 0}"
         )
 
         return {
             "factor_code": code,
-            "last_success_node": "gen_code_react",
+            "last_success_node": "generate_factor_code",
             "error": None,
-            "route": "dryrun",
+            "route": "run_factor_dryrun",
         }
 
     except Exception as e:
         print(
-            f"[DBG] gen_code_react error thread={state.get('thread_id')} msg={str(e)}"
+            f"[DBG] generate_factor_code error thread={state.get('thread_id')} msg={str(e)}"
         )
-        return _route_retry_or_hitl(
+        return _route_retry_or_human_review(
             state,
             {
-                "error": {"node": "gen_code_react", "message": str(e)},
-                "last_success_node": "gen_code_react",
+                "error": {"node": "generate_factor_code", "message": str(e)},
+                "last_success_node": "generate_factor_code",
             },
-            target_if_retry="gen_code_react",
+            target_if_retry="generate_factor_code",
         )
 
 
-def dryrun(state: FactorAgentState) -> Dict[str, Any]:
+def run_factor_dryrun(state: FactorAgentState) -> Dict[str, Any]:
     result = run_factor_dryrun(state)
     success = bool(result.get("success"))
     trace = result.get("traceback")
 
     print(
-        f"[DBG] dryrun thread={state.get('thread_id')} "
+        f"[DBG] run_factor_dryrun thread={state.get('thread_id')} "
         f"success={success} retry_count={state.get('retry_count', 0)}"
     )
 
     if success:
         return {
             "dryrun_result": {"success": True, "stdout": result.get("stdout", "")},
-            "semantic_check": {"last_error": None},
-            "last_success_node": "dryrun",
+            "check_semantics": {"last_error": None},
+            "last_success_node": "run_factor_dryrun",
             "error": None,
-            "route": "semantic_check",
+            "route": "check_semantics",
         }
 
-    return _route_retry_or_hitl(
+    return _route_retry_or_human_review(
         state,
         {
             "dryrun_result": {
@@ -145,44 +145,44 @@ def dryrun(state: FactorAgentState) -> Dict[str, Any]:
                 "traceback": result.get("traceback"),
                 "stderr": result.get("stderr", ""),
             },
-            "semantic_check": {
+            "check_semantics": {
                 "pass": False,
                 "last_error": trace,
             },
-            "error": {"node": "dryrun", "message": "dryrun failed"},
-            "last_success_node": "dryrun",
+            "error": {"node": "run_factor_dryrun", "message": "run_factor_dryrun failed"},
+            "last_success_node": "run_factor_dryrun",
         },
-        target_if_retry="gen_code_react",
+        target_if_retry="generate_factor_code",
     )
 
 
-def semantic_check(state: FactorAgentState) -> Dict[str, Any]:
+def check_semantics(state: FactorAgentState) -> Dict[str, Any]:
     check_result, check_detail = is_semantic_check_ok(state)
 
-    print(f"[DBG] semantic_check thread={state.get('thread_id')} ok={check_result} detail={check_detail}")
+    print(f"[DBG] check_semantics thread={state.get('thread_id')} ok={check_result} detail={check_detail}")
 
     if check_result:    
         return {
-            "semantic_check": check_detail or {"pass": True},
-            "last_success_node": "semantic_check",
+            "check_semantics": check_detail or {"pass": True},
+            "last_success_node": "check_semantics",
             "error": None,
             "route": "human_review_gate",
         }
 
     update = {
-        "semantic_check": check_detail
+        "check_semantics": check_detail
         or {
             "pass": False,
-            "reason": "spec/code/dryrun mismatch",
+            "reason": "spec/code/run_factor_dryrun mismatch",
         },
         "error": {
-            "node": "semantic_check",
-            "message": "semantic_check failed",
+            "node": "check_semantics",
+            "message": "check_semantics failed",
         },
-        "last_success_node": "semantic_check",
+        "last_success_node": "check_semantics",
     }
-    update2 = _route_retry_or_hitl(state, update, target_if_retry="gen_code_react")
-    print("[DBG] semantic_check fail update=", update2)
+    update2 = _route_retry_or_human_review(state, update, target_if_retry="generate_factor_code")
+    print("[DBG] check_semantics fail update=", update2)
     return update2
 
 
@@ -193,9 +193,9 @@ def human_review_gate(state: FactorAgentState) -> Dict[str, Any]:
     - 恢复后统一解析前端回传：
       新协议 action+payload 优先，旧协议 status 兜底
     """
-    # 默认需要中断；仅当 explicitly 关闭 should_interrupt 时自动通过
-    should_interrupt = state.get("should_interrupt", True)
-    if not should_interrupt:
+    # 默认需要中断；仅当 explicitly 关闭 enable_interrupt 时自动通过
+    enable_interrupt = state.get("enable_interrupt", True)
+    if not enable_interrupt:
         final_code = state.get("factor_code") or ""
         return {
             "human_review_status": "approve",
@@ -265,17 +265,17 @@ def human_review_gate(state: FactorAgentState) -> Dict[str, Any]:
                 "route": "backfill_and_eval",
             }
 
-        # ✅ 情况 2：用户 edit 了代码 → 回到 dryrun 重新跑一遍
+        # ✅ 情况 2：用户 edit 了代码 → 回到 run_factor_dryrun 重新跑一遍
         if action_norm == "edit":
             return {
                 **base_update,
-                "route": "dryrun",
-                # 可选：把旧的 dryrun/semantic_check 结果清空或标记为过期
+                "route": "run_factor_dryrun",
+                # 可选：把旧的 run_factor_dryrun/check_semantics 结果清空或标记为过期
                 "dryrun_result": {},
                 "semantic_ok": False,
             }
 
-    # ---- review 只给意见 → 回到 gen_code_react ----
+    # ---- review 只给意见 → 回到 generate_factor_code ----
     elif action_norm == "review":
         comment = (review_comment or "").strip()
         new_spec = (state.get("user_spec") or "") + f"\n\n[REVIEW COMMENT]\n{comment}"
@@ -285,7 +285,7 @@ def human_review_gate(state: FactorAgentState) -> Dict[str, Any]:
             "review_comment": comment,
             "last_success_node": "human_review_gate",
             "error": None,
-            "route": "gen_code_react",
+            "route": "generate_factor_code",
         }
 
     # ---- reject 结束 ----
@@ -361,15 +361,15 @@ def finish(state: FactorAgentState) -> Dict[str, Any]:
 
 节点：
 - collect_spec_from_messages: 收集用户描述
-- gen_code_react: 按模板生成代码
-- dryrun: 沙盒运行
-- semantic_check: 语义检查
+- generate_factor_code: 按模板生成代码
+- run_factor_dryrun: 沙盒运行
+- check_semantics: 语义检查
 - human_review_gate: AG-UI HITL（ui_request/ui_response）
 - backfill_and_eval: mock 回填评价
 - write_db: mock 入库
 - finish: 结束
 
 重试：
-- retry_count 在 _route_retry_or_hitl 中单点管理
+- retry_count 在 _route_retry_or_human_review 中单点管理
 - retry_count >= RETRY_MAX 强制进入 human_review_gate
 """

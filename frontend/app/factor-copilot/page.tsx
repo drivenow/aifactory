@@ -22,7 +22,7 @@ export type FactorAgentState = {
   factor_code?: string;
   route?: string;
   retry_count?: number;
-  should_interrupt?: boolean;
+  enable_interrupt?: boolean;
 
   human_review_status?: "pending" | "approve" | "edit" | "reject" | "review";
   review_comment?: string; // ✅ 新增字段（后端也有）

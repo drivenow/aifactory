@@ -16,7 +16,7 @@ def test_graph_success_flow():
             "retry_count": 0,
             "thread_id": "t-success",
             "run_id": "r-success",
-            "should_interrupt": False,
+            "enable_interrupt": False,
         },
         config={"configurable": {"thread_id": "t-success"}},
     )
@@ -33,7 +33,7 @@ def test_graph_failure_flow_human_review():
             "retry_count": 1,
             "thread_id": "t-fail",
             "run_id": "r-fail",
-            "should_interrupt": False,
+            "enable_interrupt": False,
         },
         config={"configurable": {"thread_id": "t-fail"}},
     )

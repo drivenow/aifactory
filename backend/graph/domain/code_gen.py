@@ -46,7 +46,7 @@ class CodeGenView(ViewBase):
     factor_code: str = ""
     code_mode: CodeMode = CodeMode.PANDAS
     dryrun_result: DryrunResult = DryrunResult(success=True)
-    semantic_check: SemanticCheckResult = SemanticCheckResult()
+    check_semantics: SemanticCheckResult = SemanticCheckResult()
 
     @classmethod
     @ViewBase._wrap_from_state("CodeGenView.from_state")
@@ -65,7 +65,7 @@ class CodeGenView(ViewBase):
             factor_name=state.get("factor_name") or "factor",
             factor_code=state.get("factor_code") or "",
             dryrun_result=_parse_dryrun(state.get("dryrun_result")),
-            semantic_check=_parse_semantic(state.get("semantic_check")),
+            check_semantics=_parse_semantic(state.get("check_semantics")),
             code_mode=state.get("code_mode") or CodeMode.PANDAS,
         )
 
@@ -101,18 +101,18 @@ def _extract_last_assistant_content(messages: List[Any]) -> str:
     return ""
 
 
-def _strip_code_fences(txt: str) -> str:
+def _unwrap_agent_code(txt: str) -> str:
     m = re.search(r"```(?:python)?\n([\s\S]*?)```", txt)
     if m:
         return m.group(1)
     return txt
 
 
-def _generate_l3_code_with_agent(view: CodeGenView) -> str:
+def _generate_l3_factor_code(view: CodeGenView) -> str:
     """使用 L3 专用 ReAct agent 生成 FactorBase 规范代码。"""
     agent = _build_l3_codegen_agent()
     if agent is None:
-        print("[DBG] _generate_l3_code_with_agent fallback without llm")
+        print("[DBG] _generate_l3_factor_code fallback without llm")
         # 简单回退：生成一个占位因子，避免空结果影响流程
         return (
             "from L3FactorFrame.FactorBase import FactorBase\n\n"
@@ -123,7 +123,7 @@ def _generate_l3_code_with_agent(view: CodeGenView) -> str:
             "        self.addFactorValue(0.0)\n"
         )
 
-    sem = view.semantic_check
+    sem = view.check_semantics
     last_error = sem.last_error if sem else ""
     # If no explicit last_error but reasons exist, join them
     if sem and sem.reason and not last_error:
@@ -148,11 +148,11 @@ def _generate_l3_code_with_agent(view: CodeGenView) -> str:
         out = agent.invoke({"messages": [sys, user]})
         msgs = out.get("messages") or []
         print(
-            "[DBG] _generate_l3_code_with_agent agent invoked",
+            "[DBG] _generate_l3_factor_code agent invoked",
             f"msgs={len(msgs)} last_error={(last_error[:80]+'...') if last_error else 'none'}",
         )
         txt = _extract_last_assistant_content(msgs)
-        return _strip_code_fences(txt).strip()
+        return _unwrap_agent_code(txt).strip()
     except Exception as e:
         print(f"[DBG] Agent invoke failed: {e}")
         return f"# Agent invoke failed: {e}\nclass {view.factor_name}(FactorBase):\n    pass"
@@ -162,13 +162,13 @@ def generate_factor_code_from_spec(state: FactorAgentState) -> str:
     view = CodeGenView.from_state(state)
     # Handle string or Enum comparison
     if view.code_mode == CodeMode.L3_PY or view.code_mode == "l3_py":
-        return _generate_l3_code_with_agent(view)
+        return _generate_l3_factor_code(view)
 
     body = simple_factor_body_from_spec(view.user_spec)
     return render_factor_code(view.factor_name, view.user_spec, body)
 
 
-def run_factor_dryrun(state: FactorAgentState) -> Dict[str, Any]:
+def run_factor(state: FactorAgentState) -> Dict[str, Any]:
     view = CodeGenView.from_state(state)
     if view.code_mode == CodeMode.L3_PY or view.code_mode == "l3_py":
         res = _mock_run(view.factor_code)
@@ -223,8 +223,8 @@ def is_semantic_check_ok(state: FactorAgentState) -> tuple[bool, Dict[str, Any]]
         return passed, result.model_dump()
 
     # pandas 模式保持兼容
-    detail = view.semantic_check or SemanticCheckResult()
-    # view.semantic_check might be a dict if coming from raw state, or object if processed
+    detail = view.check_semantics or SemanticCheckResult()
+    # view.check_semantics might be a dict if coming from raw state, or object if processed
     if isinstance(detail, SemanticCheckResult):
         return detail.passed, detail.model_dump()
     

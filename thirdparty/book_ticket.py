@@ -19,7 +19,7 @@ llm = None#ChatOpenAI(model="gpt-4o-mini", api_key=api_key, base_url=base_url)
 
 class State(MessagesState):
     route: str
-    should_interrupt: bool
+    enable_interrupt: bool
     current_booking: dict
     cart: list
     system_date: str
@@ -30,7 +30,7 @@ async def emit_event(state: State, name: str, info: dict | None = None):
         "info": info or {},
         "state": {
             "route": state.get("route"),
-            "should_interrupt": state.get("should_interrupt", False),
+            "enable_interrupt": state.get("enable_interrupt", False),
             "current_booking": state.get("current_booking", {}),
             "cart": state.get("cart", []),
             "system_date": state.get("system_date"),
@@ -39,7 +39,7 @@ async def emit_event(state: State, name: str, info: dict | None = None):
     await adispatch_custom_event(name, payload)
 
 async def interrupt_node(state: State):
-    state["should_interrupt"] = False
+    state["enable_interrupt"] = False
     await emit_event(state, "interrupt", {"route": state.get("route")})
     prompt = state.get("messages", [AIMessage(content="Please provide the requested info.")])[-1].content
     human_reply = interrupt(value=prompt)
@@ -231,17 +231,17 @@ async def schedule_agent(state: State):
     if result.ready_for_contact or (has_schedule and has_flight):
         # All done with schedule, move to contact
         state["route"] = "contact"
-        state["should_interrupt"] = False
+        state["enable_interrupt"] = False
         await emit_event(state, "schedule:complete", state["current_booking"])
     elif result.human_input and result.message:
         # LLM needs user input, show message and wait
         state["messages"] = [AIMessage(content=result.message)]
-        state["should_interrupt"] = True
+        state["enable_interrupt"] = True
         state["route"] = "schedule"
     else:
         # LLM didn't set human_input but we're not ready for contact - re-run
         state["route"] = "schedule"
-        state["should_interrupt"] = False
+        state["enable_interrupt"] = False
     
     return state
 
@@ -272,15 +272,15 @@ async def contact_agent(state: State):
     
     if result.ready_for_confirmation or (has_name and has_email):
         state["route"] = "confirm"
-        state["should_interrupt"] = False
+        state["enable_interrupt"] = False
         await emit_event(state, "contact:complete", state["current_booking"])
     elif result.human_input and result.message:
         state["messages"] = [AIMessage(content=result.message)]
-        state["should_interrupt"] = True
+        state["enable_interrupt"] = True
         state["route"] = "contact"
     else:
         state["route"] = "contact"
-        state["should_interrupt"] = False
+        state["enable_interrupt"] = False
     
     return state
 
@@ -309,12 +309,12 @@ async def confirm_agent(state: State):
         # First time - show booking summary and ask for confirmation
         if result.human_input and result.message:
             state["messages"] = [AIMessage(content=result.message)]
-            state["should_interrupt"] = True
+            state["enable_interrupt"] = True
             state["route"] = "confirm"
         else:
             # Re-run if LLM didn't provide message
             state["route"] = "confirm"
-            state["should_interrupt"] = False
+            state["enable_interrupt"] = False
     
     elif result.action == "add_to_cart":
         # Check if booking was already added (to prevent duplicates)
@@ -333,17 +333,17 @@ async def confirm_agent(state: State):
         if result.human_input and result.message:
             # First time asking - show message and wait for response
             state["messages"] = [AIMessage(content=result.message)]
-            state["should_interrupt"] = True
+            state["enable_interrupt"] = True
             state["route"] = "confirm"
         elif not result.human_input:
             # User chose to book another - clear messages and go to schedule
             state["messages"] = []
             state["route"] = "schedule"
-            state["should_interrupt"] = False
+            state["enable_interrupt"] = False
         else:
             # Shouldn't get here, but stay in confirm to be safe
             state["route"] = "confirm"
-            state["should_interrupt"] = True if result.message else False
+            state["enable_interrupt"] = True if result.message else False
             if result.message:
                 state["messages"] = [AIMessage(content=result.message)]
     
@@ -358,18 +358,18 @@ async def confirm_agent(state: State):
         summary_msg = f"## 🎉 All Done!\n\n**Total bookings:** {cart_count}\n\nThank you for using Breeze! ✈️\n\nYour confirmation has been sent to your email.\n\n---\n\n*Thank you for using this demo!*"
         state["messages"] = [AIMessage(content=summary_msg)]
         state["route"] = "END"
-        state["should_interrupt"] = False
+        state["enable_interrupt"] = False
         await emit_event(state, "booking:complete", {"cart": state["cart"]})
     
     elif result.human_input and result.message:
         # Generic case - show message and wait for user response
         state["messages"] = [AIMessage(content=result.message)]
-        state["should_interrupt"] = True
+        state["enable_interrupt"] = True
         state["route"] = "confirm"
     else:
         # Re-run confirm without interrupt
         state["route"] = "confirm"
-        state["should_interrupt"] = False
+        state["enable_interrupt"] = False
     
     return state
 
@@ -393,7 +393,7 @@ def route_or_interrupt(state: State):
     “schedule 节点跑完之后，调用 route_or_interrupt(state)。
     route_or_interrupt 返回什么，就跳到哪个 next node（必须在 allowed list 里面）。”
     """
-    if state.get("should_interrupt", False):
+    if state.get("enable_interrupt", False):
         return "interrupt_node"
     route = state.get("route", "schedule")
     if route == "END":

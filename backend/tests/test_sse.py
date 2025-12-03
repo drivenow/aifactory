@@ -19,7 +19,7 @@ def make_min_payload(
     msg_id: str = "msg-001",
     user_id: str = "u-demo-001",
     state: Optional[dict] = None,
-    should_interrupt: bool = False,
+    enable_interrupt: bool = False,
 ):
     payload = {
         "threadId": thread_id,

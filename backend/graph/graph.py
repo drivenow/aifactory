@@ -25,9 +25,9 @@ def build_graph() -> StateGraph:
 
     # 主流程节点
     g.add_node("collect_spec_from_messages", nodes.collect_spec_from_messages)
-    g.add_node("gen_code_react", nodes.gen_code_react)
-    g.add_node("dryrun", nodes.dryrun)
-    g.add_node("semantic_check", nodes.semantic_check)
+    g.add_node("generate_factor_code", nodes.generate_factor_code)
+    g.add_node("run_factor_dryrun", nodes.run_factor_dryrun)
+    g.add_node("check_semantics", nodes.check_semantics)
     g.add_node("human_review_gate", nodes.human_review_gate)
     g.add_node("backfill_and_eval", nodes.backfill_and_eval)
     g.add_node("write_db", nodes.write_db)
@@ -46,40 +46,40 @@ def build_graph() -> StateGraph:
 
     collect_spec_from_messages / backfill_and_eval / write_db / finish
     主干最好静态边，异常/重试用 Command 。
-    gen_code_react / dryrun / semantic_check
+    generate_factor_code / run_factor_dryrun / check_semantics
 
     一个简单的选型口诀（本图采用 route+conditional edges）：
     - 主干：collect_spec_from_messages / backfill_and_eval / write_db / finish 使用静态边
-    - 分支：gen_code_react / dryrun / semantic_check / human_review_gate 由 route 控制跳转
+    - 分支：generate_factor_code / run_factor_dryrun / check_semantics / human_review_gate 由 route 控制跳转
     """
     g.set_entry_point("collect_spec_from_messages")
-    g.add_edge("collect_spec_from_messages", "gen_code_react")
+    g.add_edge("collect_spec_from_messages", "generate_factor_code")
 
-    def route_from_state(state: dict):
+    def next_route(state: dict):
         route = state.get("route")
         if route == "END":
             return END
         return route
 
     g.add_conditional_edges(
-        "gen_code_react",
-        route_from_state,
-        ["dryrun", "gen_code_react", "human_review_gate"],
+        "generate_factor_code",
+        next_route,
+        ["run_factor_dryrun", "generate_factor_code", "human_review_gate"],
     )
     g.add_conditional_edges(
-        "dryrun",
-        route_from_state,
-        ["semantic_check", "gen_code_react", "human_review_gate"],
+        "run_factor_dryrun",
+        next_route,
+        ["check_semantics", "generate_factor_code", "human_review_gate"],
     )
     g.add_conditional_edges(
-        "semantic_check",
-        route_from_state,
-        ["human_review_gate", "gen_code_react"],
+        "check_semantics",
+        next_route,
+        ["human_review_gate", "generate_factor_code"],
     )
     g.add_conditional_edges(
         "human_review_gate",
-        route_from_state,
-        ["backfill_and_eval","dryrun","gen_code_react","finish"],
+        next_route,
+        ["backfill_and_eval","run_factor_dryrun","generate_factor_code","finish"],
     )
 
     g.add_edge("backfill_and_eval", "write_db")

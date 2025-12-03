@@ -41,15 +41,15 @@ class CodeMode(str, Enum):
 ```
 
 ```python
-# semantic_check 结果
+# check_semantics 结果
 class SemanticCheckResult(BaseModel):
     passed: bool = True                # 语义检查是否通过
     reason: List[str] = []             # 不通过的原因列表（用户可见）
-    last_error: str = ""               # 上一轮 dryrun/语义失败摘要（截断后的字符串）
+    last_error: str = ""               # 上一轮 run_factor_dryrun/语义失败摘要（截断后的字符串）
 ```
 
 ```python
-# dryrun 结果（两种模式共用）
+# run_factor_dryrun 结果（两种模式共用）
 class DryrunResult(BaseModel):
     success: bool                      # 运行是否成功（语法+运行层面）
     traceback: Optional[str] = None    # 错误堆栈（截断前）
@@ -64,7 +64,7 @@ class CodeGenView(ViewBase):
     factor_code: str = ""              # 当前生成的代码全文
     code_mode: CodeMode = CodeMode.PANDAS
     dryrun_result: DryrunResult = DryrunResult(success=True)
-    semantic_check: SemanticCheckResult = SemanticCheckResult()
+    check_semantics: SemanticCheckResult = SemanticCheckResult()
 ```
 
 > `FactorAgentState` 就继续用你现在的 dict 结构，只要保证这几个 key 被读写即可。
@@ -224,7 +224,7 @@ NONFACTOR_META = {
 
      * 至少一个 `l3_syntax_check` 或 `l3_mock_run` 自检；
   4. 最终只输出完整 Python 代码（无 ```，无解释）。
-  5. “如果 l3_mock_run 返回失败，就在 semantic_check.last_error 里写清错误，再走一轮 codegen”，
+  5. “如果 l3_mock_run 返回失败，就在 check_semantics.last_error 里写清错误，再走一轮 codegen”，
 让模型在实践中“学会”必须用工具。
 ---
 
@@ -232,7 +232,7 @@ NONFACTOR_META = {
 
 **职责：**
 
-* 根据 state（spec + mode + semantic_check）调合适的 codegen 流程；
+* 根据 state（spec + mode + check_semantics）调合适的 codegen 流程；
 * 为 nodes 提供稳定 API。
 
 
@@ -266,12 +266,12 @@ def _build_l3_codegen_agent():
 #### 2.3.2 L3 代码生成逻辑
 
 ````python
-def _generate_l3_code_with_agent(view: CodeGenView) -> str:
+def _generate_l3_factor_code(view: CodeGenView) -> str:
     agent = _build_l3_codegen_agent()
     if agent is None:
         return "# TODO: L3 codegen fallback (LLM unavailable)\n"
 
-    last_error = _truncate(view.semantic_check.last_error)
+    last_error = _truncate(view.check_semantics.last_error)
 
     sys = SystemMessage(content=PROMPT_FACTOR_L3_PY)
     user_content = (
@@ -293,7 +293,7 @@ def generate_factor_code_from_spec(state: FactorAgentState) -> str:
     view = CodeGenView.from_state(state)
 
     if view.code_mode == CodeMode.L3_PY:
-        code = _generate_l3_code_with_agent(view)
+        code = _generate_l3_factor_code(view)
     else:
         # 保留原有 pandas 模板行为
         body = simple_factor_body_from_spec(view.user_spec)
@@ -322,11 +322,11 @@ def run_factor_dryrun(state: FactorAgentState) -> Dict[str, Any]:
         )
         state["dryrun_result"] = dry.dict()
 
-        # 失败时更新 semantic_check.last_error（截断）
-        semantic = view.semantic_check
+        # 失败时更新 check_semantics.last_error（截断）
+        semantic = view.check_semantics
         if not dry.success:
             semantic.last_error = _truncate(dry.traceback or "")
-        state["semantic_check"] = semantic.dict()
+        state["check_semantics"] = semantic.dict()
         return dry.dict()
 
     # pandas 模式保持现有行为
@@ -336,17 +336,17 @@ def run_factor_dryrun(state: FactorAgentState) -> Dict[str, Any]:
         args={"args": ["2020-01-01", "2020-01-10", ["A"]], "kwargs": {}},
     )
     state["dryrun_result"] = result
-    # 可选：同步错误到 semantic_check.last_error
+    # 可选：同步错误到 check_semantics.last_error
     return result
 ```
 
-#### 2.4.2 `semantic_check` 节点
+#### 2.4.2 `check_semantics` 节点
 
 ```python
-def semantic_check(state: FactorAgentState) -> FactorAgentState:
+def check_semantics(state: FactorAgentState) -> FactorAgentState:
     view = CodeGenView.from_state(state)
     code = view.factor_code
-    semantic = view.semantic_check
+    semantic = view.check_semantics
 
     if view.code_mode == CodeMode.L3_PY:
         reasons = []
@@ -366,19 +366,19 @@ def semantic_check(state: FactorAgentState) -> FactorAgentState:
         else:
             semantic.passed = True
             semantic.reason = []
-            # last_error 保留给下一轮（dryrun）使用，或者清空均可
+            # last_error 保留给下一轮（run_factor_dryrun）使用，或者清空均可
 
-        state["semantic_check"] = semantic.dict()
+        state["check_semantics"] = semantic.dict()
         return state
 
     # pandas：默认通过 / 简单关键字检查
     semantic.passed = True
     semantic.reason = []
-    state["semantic_check"] = semantic.dict()
+    state["check_semantics"] = semantic.dict()
     return state
 ```
 
-外层 `_route_retry_or_hitl` 保持现状：只看 `semantic_check.passed` / `dryrun_result.success` 与 retry_count 决定走重试还是 HITL。
+外层 `_route_retry_or_human_review` 保持现状：只看 `check_semantics.passed` / `dryrun_result.success` 与 retry_count 决定走重试还是 HITL。
 
 ---
 
@@ -394,14 +394,14 @@ def semantic_check(state: FactorAgentState) -> FactorAgentState:
 ### Phase 2：L3 Agent 接入（1 天）
 
 1. 更新 `prompts/factor_l3_py.py`，加入 nonfactor 使用规范 + 工具使用 + 输出要求。
-2. 在 `domain/code_gen.py` 中实现 `_build_l3_codegen_agent` + `_generate_l3_code_with_agent`。
+2. 在 `domain/code_gen.py` 中实现 `_build_l3_codegen_agent` + `_generate_l3_factor_code`。
 3. 在 `generate_factor_code_from_spec` 中按 `code_mode` 分发。
 
-### Phase 3：dryrun & semantic_check 适配（0.5–1 天）
+### Phase 3：run_factor_dryrun & check_semantics 适配（0.5–1 天）
 
 1. 更新 `nodes.run_factor_dryrun`，实现 L3 分支使用 `l3_mock_run`。
-2. 更新 `nodes.semantic_check`，实现 L3 规则检查 & last_error 维护。
-3. 保证 `_route_retry_or_hitl` 不需要改，只要 state 结构匹配即可。
+2. 更新 `nodes.check_semantics`，实现 L3 规则检查 & last_error 维护。
+3. 保证 `_route_retry_or_human_review` 不需要改，只要 state 结构匹配即可。
 
 ### Phase 4：回归 & L3 smoke 测试（0.5 天）
 
@@ -412,7 +412,7 @@ def semantic_check(state: FactorAgentState) -> FactorAgentState:
    * `user_spec` 描述“基于 FactorSecTradeAgg，计算买卖意愿”等。
 2. 跑一遍完整 LangGraph 流程：
 
-   * 期望：`factor_code` 非空、dryrun success、semantic_check passed。
+   * 期望：`factor_code` 非空、run_factor_dryrun success、check_semantics passed。
 3. 再跑一遍 pandas 路径，验证兼容性。
 
 ### Phase 5（可选）：强化 nonfactor metadata & mock scenarios（1–2 天）
