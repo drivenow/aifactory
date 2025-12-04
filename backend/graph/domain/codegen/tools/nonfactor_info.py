@@ -1,6 +1,8 @@
 from typing import Dict, List, Optional
+from pathlib import Path
 from langchain_core.tools import tool
 from backend.graph.tools.codebase_fs_tools import safe_fs
+
 
 # --- Nonfactor Metadata Definitions ---
 
@@ -59,10 +61,11 @@ NONFACTOR_META_DATA = {
 }
 
 # Mapping names to relative file paths
+_BASE_DIR = Path(__file__).resolve().parent
 NONFACTOR_PATHS = {
-    "FactorSecOrderBook": "backend/graph/tools/NonFactors/FactorSecOrderBook.py",
-    "FactorSecTradeAgg": "backend/graph/tools/NonFactors/FactorSecTradeAgg.py",
-    "FactorSecOrderAgg": "backend/graph/tools/NonFactors/FactorSecOrderAgg.py",
+    "FactorSecOrderBook": str(_BASE_DIR / "NonFactors/FactorSecOrderBook.py"),
+    "FactorSecTradeAgg": str(_BASE_DIR / "NonFactors/FactorSecTradeAgg.py"),
+    "FactorSecOrderAgg": str(_BASE_DIR / "NonFactors/FactorSecOrderAgg.py"),
 }
 
 

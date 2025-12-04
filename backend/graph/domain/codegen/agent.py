@@ -3,15 +3,16 @@ from __future__ import annotations
 from typing import Any, List, Optional
 import re
 
+
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import SystemMessage, HumanMessage
-
-from backend.graph.config import get_llm
-from backend.graph.prompts.factor_l3_py import PROMPT_FACTOR_L3_PY
-from backend.graph.tools.codebase_fs_tools import read_repo_file, list_repo_dir
+from ...config import get_llm
+from .prompts.factor_l3_py import PROMPT_FACTOR_L3_PY
+# from .tools.codebase_fs_tools import read_repo_file, list_repo_dir
 from .tools.l3_factor_tool import l3_syntax_check, l3_mock_run
 from .tools.nonfactor_info import get_formatted_nonfactor_info
 from .view import CodeGenView
+
 
 _L3_AGENT: Optional[Any] = None
 
@@ -32,8 +33,8 @@ def build_l3_codegen_agent():
         return None
 
     tools = [
-        read_repo_file,
-        list_repo_dir,
+        # read_repo_file,
+        # list_repo_dir,
         l3_syntax_check,
         l3_mock_run,
     ]

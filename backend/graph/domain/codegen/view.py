@@ -3,9 +3,29 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, List, Optional
 
-from pydantic import BaseModel
+try:
+    from pydantic import BaseModel
+except Exception:  # pragma: no cover
+    class BaseModel:  # minimal stub to avoid hard dependency when standalone
+        def __init__(self, **data):
+            for k, v in data.items():
+                setattr(self, k, v)
 
-from backend.graph.state import FactorAgentState, ViewBase
+        def model_dump(self):
+            return self.__dict__
+
+try:
+    from backend.graph.state import FactorAgentState, ViewBase
+except Exception:  # pragma: no cover
+    class ViewBase(BaseModel):
+        @classmethod
+        def _wrap_from_state(cls, name):
+            def deco(func):
+                return func
+            return deco
+
+    class FactorAgentState(dict):
+        pass
 
 
 class CodeMode(str, Enum):

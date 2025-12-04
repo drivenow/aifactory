@@ -8,6 +8,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.graph.domain import code_gen
+from backend.graph import agent as l3_agent
 
 
 class DummyAgent:
@@ -32,9 +33,9 @@ def test_l3_codegen_and_dryrun(monkeypatch):
     dummy_agent = DummyAgent()
 
     # stub out llm + agent builder
-    monkeypatch.setattr(code_gen, "_L3_AGENT", None)
-    monkeypatch.setattr(code_gen, "get_llm", lambda: "llm")
-    monkeypatch.setattr(code_gen, "create_agent", lambda llm, tools=None: dummy_agent)
+    monkeypatch.setattr(l3_agent, "_L3_AGENT", None)
+    monkeypatch.setattr(l3_agent, "get_llm", lambda: "llm")
+    monkeypatch.setattr(l3_agent, "create_agent", lambda llm, tools=None: dummy_agent)
 
     state = {
         "user_spec": "最近3笔买卖盘价量比对比",

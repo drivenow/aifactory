@@ -4,8 +4,8 @@ import ast
 import traceback
 import sys
 from typing import Any, Dict, List, Optional
-from langchain_core.tools import tool
 
+from langchain_core.tools import tool
 # --- Mocks & Stubs ---
 
 def build_mock_tick_data(length: int = 5) -> List[Dict[str, Any]]:

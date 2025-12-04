@@ -4,6 +4,7 @@ from .tools.factor_template import (
     render_factor_code,
     simple_factor_body_from_spec,
 )
+
 from .agent import invoke_l3_agent
 from .view import CodeGenView, CodeMode
 
