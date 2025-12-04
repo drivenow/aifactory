@@ -48,6 +48,14 @@ function Inner() {
       retry_count: 0,
       human_review_status: "pending",
     },
+    // config: {
+    //   configurable: {
+    //     // 这个字符串就是 LangGraph 那边看到的 configurable.thread_id
+    //     thread_id: "factor-thread-1",
+    //     // 如果你有真实的会话 ID，可以用它：
+    //     // thread_id: someReactStateOrRouteParam,
+    //   },
+    // },
   });
 
   // 固定右侧 HITL Panel 的事件/resolve

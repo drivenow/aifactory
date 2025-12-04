@@ -31,7 +31,7 @@ class CodeMode(str, Enum):
 class SemanticCheckResult(BaseModel):
     passed: bool = True
     reason: List[str] = []
-    last_error: str = ""
+    last_error: Optional[str] = None
 
 
 class DryrunResult(BaseModel):

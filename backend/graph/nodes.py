@@ -9,7 +9,7 @@ from .state import FactorAgentState, FactorAgentStateModel, HumanReviewStatus
 from .domain import (
     extract_spec_and_name,
     generate_factor_code_from_spec,
-    run_factor_dryrun,
+    run_factor,
     is_semantic_check_ok,
     compute_eval_metrics,
     write_factor_and_metrics,
@@ -43,6 +43,8 @@ def _route_retry_or_human_review(
             "retry_count": rc,
             "route": "human_review_gate",
             "enable_interrupt": True,
+            "ui_response": None,   # ⭐ 关键：下次一定会重新 interrupt
+            "ui_request": None,  # 可选，顺手清掉
         }
 
     if current >= RETRY_MAX:
@@ -119,7 +121,7 @@ def generate_factor_code(state: FactorAgentState) -> Dict[str, Any]:
 
 
 def run_factor_dryrun(state: FactorAgentState) -> Dict[str, Any]:
-    result = run_factor_dryrun(state)
+    result = run_factor(state)
     success = bool(result.get("success"))
     trace = result.get("traceback")
 
@@ -216,10 +218,15 @@ def human_review_gate(state: FactorAgentState) -> Dict[str, Any]:
     }
 
     # 第一次进入：中断并把 req 发给前端；如果已有响应则复用, 主要用于测试用例模拟中断
-    if state.get("ui_response") is None:
-        ui_resp_raw = interrupt(req)
-    else:
-        ui_resp_raw = state.get("ui_response")
+    # if state.get("ui_response") is None:
+    #     """
+    #     失败的节点直接 route 回 human_review_gate，但没有清理 ui_response，
+    #     导致 human_review_gate 以为“已经有人回过了”而不再 interrupt，一直复用第一条 "edit" 响应，
+    #     在 run_factor_dryrun 和 human_review_gate 之间无限循环，最终触发 LangGraph 的 GraphRecursionError。
+    #     """
+    ui_resp_raw = interrupt(req)
+    # else:
+    #     ui_resp_raw = state.get("ui_response")
 
     # 允许前端传 string/json/dict 等多形态
     ui_resp, status, edited_code = normalize_review_response(ui_resp_raw)

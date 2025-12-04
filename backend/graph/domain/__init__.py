@@ -1,7 +1,7 @@
 # backend/graph/domain/__init__.py
 from .code_gen import (
     generate_factor_code_from_spec,
-    run_factor_dryrun,
+    run_factor,
     is_semantic_check_ok,
 )
 from .eval import (
