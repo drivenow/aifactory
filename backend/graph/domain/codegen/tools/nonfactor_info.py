@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional
 from langchain_core.tools import tool
-from .codebase_fs_tools import safe_fs
+from backend.graph.tools.codebase_fs_tools import safe_fs
 
 # --- Nonfactor Metadata Definitions ---
 

@@ -2,6 +2,7 @@
 from .code_gen import (
     generate_factor_code_from_spec,
     run_factor,
+    run_factor_dryrun,
     is_semantic_check_ok,
 )
 from .eval import (
