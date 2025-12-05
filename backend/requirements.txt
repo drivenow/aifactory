@@ -1,0 +1,7 @@
+langgraph>=1.0.4
+langchain>=1.0.8
+ag-ui-langgraph==0.0.22
+pydantic>=2.12.4
+fastapi>=0.121.1
+numpy>=1.23.0
+pandas>=1.5.0
