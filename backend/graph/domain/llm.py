@@ -11,6 +11,8 @@ os.environ["OPENAI_API_KEY"] = "sk-kcprjafyronffotrpxxovupsxzqolveqkypbmubjsopdb
 
 def create_agent(tools: Optional[List[Any]] = None):
     """Thin wrapper to allow monkeypatch in tests."""
+    if create_react_agent is None or ChatOpenAI is None:
+        return None
     llm = get_llm()
     return create_react_agent(llm, tools=tools)
 

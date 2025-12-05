@@ -66,8 +66,8 @@ def invoke_l3_agent(view: CodeGenView) -> str:
             "        self.addFactorValue(0.0)\n"
         )
 
-    formatted_prompt = PROMPT_FACTOR_L3_PY.format(
-        nonfactor_infos=get_formatted_nonfactor_info_py()
+    formatted_prompt = PROMPT_FACTOR_L3_PY.replace(
+        "{nonfactor_infos}", get_formatted_nonfactor_info_py()
     )
     sys = SystemMessage(content=formatted_prompt)
     user = build_l3_user_message(view)
@@ -103,8 +103,8 @@ def invoke_l3_cpp_agent(view: CodeGenView) -> str:
             f"class {view.factor_name} {{}};\n"
         )
 
-    formatted_prompt = PROMPR_FACTOR_L3_CPP.format(
-        nonfactor_infos=get_formatted_nonfactor_info_cpp()
+    formatted_prompt = PROMPR_FACTOR_L3_CPP.replace(
+        "{nonfactor_infos}", get_formatted_nonfactor_info_cpp()
     )
     sys = SystemMessage(content=formatted_prompt)
     user = build_l3_user_message(view)
