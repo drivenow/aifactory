@@ -2,8 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from .tools.l3_factor_tool import _mock_run
-from backend.graph.tools.sandbox_runner import run_code
+from domain.codegen.tools.l3_factor_tool import _mock_run
+from domain.codegen.view import CodeGenView, CodeMode
+
+try:
+    from ...tools.sandbox_runner import run_code
+except (ImportError, ValueError):
+    def run_code(*args, **kwargs):
+        return {"success": False, "error": "sandbox_runner not available in standalone mode"}
 
 
 

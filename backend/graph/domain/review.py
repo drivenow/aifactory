@@ -5,7 +5,7 @@ import json
 from pydantic import BaseModel, Field
 from typing import Any, Dict, Tuple, Optional
 
-from ..state import FactorAgentState, ViewBase, HumanReviewStatus
+from global_state import FactorAgentState, ViewBase, HumanReviewStatus
 
 class HumanReviewView(ViewBase):
     """

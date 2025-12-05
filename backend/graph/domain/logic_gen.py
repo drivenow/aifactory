@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Tuple, Any, Dict, List
 from pydantic import BaseModel, Field
 from typing import Tuple, Any, Dict, List
-from ..state import FactorAgentState, ViewBase
+from global_state import FactorAgentState, ViewBase
 
 class LogicView(ViewBase):
     """

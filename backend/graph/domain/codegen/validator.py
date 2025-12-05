@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Dict, Tuple
 
-from .view import CodeGenView, CodeMode, SemanticCheckResult
+from domain.codegen.view import CodeGenView, CodeMode, SemanticCheckResult
 
 
 def is_semantic_check_ok(state) -> Tuple[bool, Dict]:

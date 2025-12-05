@@ -5,8 +5,8 @@ from .tools.factor_template import (
     simple_factor_body_from_spec,
 )
 
-from .agent import invoke_l3_agent
-from .view import CodeGenView, CodeMode
+from domain.codegen.agent import invoke_l3_agent
+from domain.codegen.view import CodeGenView, CodeMode
 
 
 def generate_l3_factor_code(view: CodeGenView) -> str:

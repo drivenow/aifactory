@@ -15,8 +15,8 @@ except Exception:  # pragma: no cover
             return self.__dict__
 
 try:
-    from backend.graph.state import FactorAgentState, ViewBase
-except Exception:  # pragma: no cover
+    from global_state import FactorAgentState, ViewBase
+except (ImportError, ValueError):  # pragma: no cover
     class ViewBase(BaseModel):
         @classmethod
         def _wrap_from_state(cls, name):

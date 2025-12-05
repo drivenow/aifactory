@@ -39,7 +39,7 @@ from langgraph.errors import GraphInterrupt
 from langgraph.types import Command
 
 from backend.graph.graph import graph
-from backend.graph.state import FactorAgentState
+from backend.graph.global_state import FactorAgentState
 
 
 def _unwrap_interrupt(payload: Any) -> Any:

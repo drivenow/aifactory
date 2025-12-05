@@ -2,16 +2,14 @@ from __future__ import annotations
 
 from typing import Any, List, Optional
 import re
-
-
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import SystemMessage, HumanMessage
-from ...config import get_llm
-from .prompts.factor_l3_py import PROMPT_FACTOR_L3_PY
+from domain.llm import get_llm
+from domain.codegen.prompts.factor_l3_py import PROMPT_FACTOR_L3_PY
 # from .tools.codebase_fs_tools import read_repo_file, list_repo_dir
-from .tools.l3_factor_tool import l3_syntax_check, l3_mock_run
-from .tools.nonfactor_info import get_formatted_nonfactor_info
-from .view import CodeGenView
+from domain.codegen.tools.l3_factor_tool import l3_syntax_check, l3_mock_run
+from domain.codegen.tools.nonfactor_info import get_formatted_nonfactor_info
+from domain.codegen.view import CodeGenView
 
 
 _L3_AGENT: Optional[Any] = None
@@ -22,13 +20,15 @@ def create_agent(llm: Any, tools: Optional[List[Any]] = None):
     return create_react_agent(llm, tools=tools)
 
 
-def build_l3_codegen_agent():
+def build_l3_codegen_agent(llm: Optional[Any] = None):
     """Build or reuse cached L3 ReAct agent."""
     global _L3_AGENT
-    if _L3_AGENT is not None:
+    if _L3_AGENT is not None and llm is None:
         return _L3_AGENT
 
-    llm = get_llm()
+    if llm is None:
+        llm = get_llm()
+
     if (not llm) or (create_react_agent is None):
         return None
 
@@ -101,4 +101,4 @@ def invoke_l3_agent(view: CodeGenView) -> str:
         txt = _extract_last_assistant_content(msgs)
         return _unwrap_agent_code(txt).strip()
     except Exception as e:
-        return f"# Agent invoke failed: {e}\nclass {view.factor_name}(FactorBase):\n    pass"
+        return f"ERROR: Agent invoke failed: {e}\nclass {view.factor_name}(FactorBase):\n    pass"

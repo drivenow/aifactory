@@ -1,8 +1,6 @@
 from typing import Dict, List, Optional
 from pathlib import Path
 from langchain_core.tools import tool
-from backend.graph.tools.codebase_fs_tools import safe_fs
-
 
 # --- Nonfactor Metadata Definitions ---
 
@@ -97,7 +95,12 @@ def nonfactor_source(name: str) -> Dict:
         return {"ok": False, "error": f"Non-factor '{name}' not found."}
     
     file_path = NONFACTOR_PATHS[name]
-    read_res = safe_fs.read_file_content(file_path)
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        read_res = {"ok": True, "content": content}
+    except Exception as e:
+        read_res = {"ok": False, "error": str(e)}
     
     if not read_res.get("ok"):
         return {"ok": False, "error": f"Failed to read source: {read_res.get('error')}"}
@@ -120,10 +123,11 @@ def get_formatted_nonfactor_info() -> str:
     
     for name, path in NONFACTOR_PATHS.items():
         lines.append(f"\n--- {name} ---")
-        read_res = safe_fs.read_file_content(path)
-        if read_res.get("ok"):
-            lines.append(read_res.get("content", ""))
-        else:
-            lines.append(f"Error reading source: {read_res.get('error')}")
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
+            lines.append(content)
+        except Exception as e:
+            lines.append(f"Error reading source: {e}")
             
     return "\n".join(lines)

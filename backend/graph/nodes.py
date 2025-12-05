@@ -5,7 +5,7 @@ from typing import Dict, Any, Optional, List
 from langgraph.graph import END
 from langgraph.types import interrupt
 
-from .state import FactorAgentState, FactorAgentStateModel, HumanReviewStatus
+from .global_state import FactorAgentState, FactorAgentStateModel, HumanReviewStatus
 from .domain import (
     extract_spec_and_name,
     generate_factor_code_from_spec,
