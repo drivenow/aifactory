@@ -7,7 +7,10 @@ from domain.codegen.prompts.factor_l3_py import PROMPT_FACTOR_L3_PY
 from domain.codegen.prompts.factor_l3_cpp import PROMPR_FACTOR_L3_CPP
 # from .tools.codebase_fs_tools import read_repo_file, list_repo_dir
 from domain.codegen.tools.l3_factor_tool import l3_syntax_check, l3_mock_run
-from domain.codegen.tools.nonfactor_info import get_formatted_nonfactor_info
+from domain.codegen.tools.nonfactor_info import (
+    get_formatted_nonfactor_info_py,
+    get_formatted_nonfactor_info_cpp,
+)
 from domain.codegen.view import CodeGenView
 
 
@@ -64,7 +67,7 @@ def invoke_l3_agent(view: CodeGenView) -> str:
         )
 
     formatted_prompt = PROMPT_FACTOR_L3_PY.format(
-        nonfactor_infos=get_formatted_nonfactor_info()
+        nonfactor_infos=get_formatted_nonfactor_info_py()
     )
     sys = SystemMessage(content=formatted_prompt)
     user = build_l3_user_message(view)
@@ -100,7 +103,10 @@ def invoke_l3_cpp_agent(view: CodeGenView) -> str:
             f"class {view.factor_name} {{}};\n"
         )
 
-    sys = SystemMessage(content=PROMPR_FACTOR_L3_CPP)
+    formatted_prompt = PROMPR_FACTOR_L3_CPP.format(
+        nonfactor_infos=get_formatted_nonfactor_info_cpp()
+    )
+    sys = SystemMessage(content=formatted_prompt)
     user = build_l3_user_message(view)
 
     try:

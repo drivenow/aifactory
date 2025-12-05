@@ -58,11 +58,11 @@ PROMPR_FACTOR_L3_CPP = """
 
 4. **nonfactor 字段说明与示例（已在系统中提供）**
 
-   * `FactorSecOrderBook`：提供采样 1s 的盘口快照聚合字段，如 `last_px_list`, `high_px_list`, `low_px_list`, 十档 `ask_qty_list / bid_qty_list` 等；
-   * `FactorSecTradeAgg`：提供采样 1s 的成交聚合字段，如 `trade_buy_money_list`, `trade_sell_money_list`, `trade_buy_num_list`, `trade_sell_num_list`, `trade_net_volume_list` 等；
-   * `FactorSecOrderAgg`、`FactorSecTradeAgg2` 等其他 nonfactor 说明。
+   当前可用 C++ NonFactor 字段与注释：
 
-   对应关系遵循 Python nonfactor 与 C++ nonfactor 字段同名的原则：
+{nonfactor_infos}
+
+   对应关系遵循 Python nonfactor 与 C++ nonfactor 字段同名的原则（同名字段保持等价读取）：
    例如：Python 里的 `self.nonfactor.trade_buy_money_list[-1]` 对应 C++ 里的 `nonfac->trade_buy_money_list.back()`。
 
 5. **C++ 示例因子模版**
