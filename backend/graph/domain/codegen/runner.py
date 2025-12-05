@@ -32,6 +32,11 @@ def run_factor(state) -> Dict[str, Any]:
             "traceback": res.get("error"),
             "stderr": res.get("error"),
         }
+    if view.code_mode == CodeMode.L3_CPP or view.code_mode == "l3_cpp":
+        return {
+            "success": False,
+            "stderr": "C++ 因子暂不支持本地 mock 运行，请在 SDK 环境中编译执行。",
+        }
 
     return run_code(
         view.factor_code,

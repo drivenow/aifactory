@@ -4,6 +4,7 @@ from typing import Any, List, Optional
 from langchain_core.messages import SystemMessage, HumanMessage
 from domain.llm import create_agent, _extract_last_assistant_content, _unwrap_agent_code
 from domain.codegen.prompts.factor_l3_py import PROMPT_FACTOR_L3_PY
+from domain.codegen.prompts.factor_l3_cpp import PROMPR_FACTOR_L3_CPP
 # from .tools.codebase_fs_tools import read_repo_file, list_repo_dir
 from domain.codegen.tools.l3_factor_tool import l3_syntax_check, l3_mock_run
 from domain.codegen.tools.nonfactor_info import get_formatted_nonfactor_info
@@ -11,6 +12,7 @@ from domain.codegen.view import CodeGenView
 
 
 _L3_AGENT: Optional[Any] = None
+_L3_CPP_AGENT: Optional[Any] = None
 
 
 def build_l3_codegen_agent():
@@ -74,3 +76,37 @@ def invoke_l3_agent(view: CodeGenView) -> str:
         return _unwrap_agent_code(txt).strip()
     except Exception as e:
         return f"ERROR: Agent invoke failed: {e}\nclass {view.factor_name}(FactorBase):\n    pass"
+
+
+def build_l3_cpp_codegen_agent():
+    """Build or reuse cached L3 C++ ReAct agent."""
+    global _L3_CPP_AGENT
+    if _L3_CPP_AGENT is not None:
+        return _L3_CPP_AGENT
+
+    tools: List[Any] = []
+    _L3_CPP_AGENT = create_agent(tools=tools)
+    return _L3_CPP_AGENT
+
+
+def invoke_l3_cpp_agent(view: CodeGenView) -> str:
+    """使用 L3 C++ 专用 ReAct agent 生成 Factor SDK 规范代码。"""
+    agent = build_l3_cpp_codegen_agent()
+    if agent is None:
+        return (
+            "// Agent 未配置，返回占位实现\n"
+            "#include <stdexcept>\n"
+            f"struct {view.factor_name}Param {{}};\n"
+            f"class {view.factor_name} {{}};\n"
+        )
+
+    sys = SystemMessage(content=PROMPR_FACTOR_L3_CPP)
+    user = build_l3_user_message(view)
+
+    try:
+        out = agent.invoke({"messages": [sys, user]})
+        msgs = out.get("messages") or []
+        txt = _extract_last_assistant_content(msgs)
+        return _unwrap_agent_code(txt, lang="cpp").strip()
+    except Exception as e:
+        return f"// ERROR: Agent invoke failed: {e}\n"

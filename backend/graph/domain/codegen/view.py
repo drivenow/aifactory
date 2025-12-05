@@ -31,6 +31,7 @@ except (ImportError, ValueError):  # pragma: no cover
 class CodeMode(str, Enum):
     PANDAS = "pandas"
     L3_PY = "l3_py"
+    L3_CPP = "l3_cpp"
 
 
 class SemanticCheckResult(BaseModel):
