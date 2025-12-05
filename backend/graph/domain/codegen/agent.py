@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 from typing import Any, List, Optional
-import re
-from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import SystemMessage, HumanMessage
-from domain.llm import get_llm
+from domain.llm import create_agent, _extract_last_assistant_content, _unwrap_agent_code
 from domain.codegen.prompts.factor_l3_py import PROMPT_FACTOR_L3_PY
 # from .tools.codebase_fs_tools import read_repo_file, list_repo_dir
 from domain.codegen.tools.l3_factor_tool import l3_syntax_check, l3_mock_run
@@ -15,22 +13,11 @@ from domain.codegen.view import CodeGenView
 _L3_AGENT: Optional[Any] = None
 
 
-def create_agent(llm: Any, tools: Optional[List[Any]] = None):
-    """Thin wrapper to allow monkeypatch in tests."""
-    return create_react_agent(llm, tools=tools)
-
-
-def build_l3_codegen_agent(llm: Optional[Any] = None):
+def build_l3_codegen_agent():
     """Build or reuse cached L3 ReAct agent."""
     global _L3_AGENT
-    if _L3_AGENT is not None and llm is None:
+    if _L3_AGENT is not None:
         return _L3_AGENT
-
-    if llm is None:
-        llm = get_llm()
-
-    if (not llm) or (create_react_agent is None):
-        return None
 
     tools = [
         # read_repo_file,
@@ -39,24 +26,8 @@ def build_l3_codegen_agent(llm: Optional[Any] = None):
         l3_mock_run,
     ]
 
-    _L3_AGENT = create_agent(llm, tools=tools)
+    _L3_AGENT = create_agent(tools=tools)
     return _L3_AGENT
-
-
-def _extract_last_assistant_content(messages: List[Any]) -> str:
-    """从 agent 返回的消息列表中提取最后一条 assistant 内容。"""
-    for m in reversed(messages):
-        role = getattr(m, "type", None) or getattr(m, "role", None)
-        if role in ("assistant", "ai"):
-            return getattr(m, "content", "") or ""
-    return ""
-
-
-def _unwrap_agent_code(txt: str) -> str:
-    m = re.search(r"```(?:python)?\n([\s\S]*?)```", txt)
-    if m:
-        return m.group(1)
-    return txt
 
 
 def build_l3_user_message(view: CodeGenView) -> HumanMessage:
@@ -68,6 +39,7 @@ def build_l3_user_message(view: CodeGenView) -> HumanMessage:
     user_content = (
         f"因子类名: {view.factor_name}\n"
         f"因子需求描述: {view.user_spec}\n"
+        f"因子代码: {view.factor_code}\n" if view.factor_code else ""
     )
     if last_error:
         user_content += f"\n[上一轮错误摘要]\n{last_error[:2000]}\n"
