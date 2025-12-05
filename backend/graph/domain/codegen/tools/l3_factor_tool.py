@@ -71,7 +71,7 @@ class FactorManagerStub:
     def register_factor(self, name, obj):
         self.factors[name] = obj
 
-# Stubs for NonFactors (populated with some dummy data to prevent IndexErrors)
+# Stubs for py_nonfactor (populated with some dummy data to prevent IndexErrors)
 class FactorSecTradeAggStub:
     def __init__(self):
         self.trade_buy_money_list = [1000.0] * 10
@@ -210,7 +210,7 @@ def _mock_run(code: str) -> Dict[str, Any]:
         # 2. Execute Stub Definitions
         exec(L3_FACTORBASE_STUB, ns, ns)
         
-        # 3. Setup FactorManager and NonFactors
+        # 3. Setup FactorManager and py_nonfactor
         fm = ns["FactorManagerStub"]()
         fm.register_factor("FactorSecTradeAgg", ns["FactorSecTradeAggStub"]())
         fm.register_factor("FactorSecOrderBook", ns["FactorSecOrderBookStub"]())

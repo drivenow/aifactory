@@ -1,5 +1,5 @@
 PROMPR_FACTOR_L3_CPP = """
-# 高频量化因子转写任务（Python → C++）
+# 高频量化因子转写任务（Python/自然语言描述 → C++）
 
 你是一名资深的高频量化因子工程师，精通 Python L3 因子框架和 C++ L3 因子框架。  
 你的任务是在**保持原有因子算法逻辑不变**的前提下，将基于 L3 逐笔/采样 1s 行情的 **Python 因子实现或因子逻辑描述**，转写为符合特定 SDK 规范的 C++ 因子实现。
@@ -65,15 +65,18 @@ PROMPR_FACTOR_L3_CPP = """
    对应关系遵循 Python nonfactor 与 C++ nonfactor 字段同名的原则：
    例如：Python 里的 `self.nonfactor.trade_buy_money_list[-1]` 对应 C++ 里的 `nonfac->trade_buy_money_list.back()`。
 
-5. **C++ 示例因子模版（已在系统中提供）**
-   示例展示了完整的 C++ 因子写法，包括：
-
-   * 头文件包含：`all_factor_types.h` / `base_factor.h` / `compute.h` / 对应 nonfactor 头文件；
-   * `Param` 结构体 + `NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT`；
-   * 因子类模板继承 + `FACTOR_INIT` 宏；
-   * `SlidingWindow` 成员初始化与 `compute` 算子使用；
-   * `calculate()` 中设置 `value()` 并返回 `Status::OK()`；
-   * `FACTOR_REGISTER(FactorName)`。
+5. **C++ 示例因子模版**
+以下是 C++ 因子框架的编码规范要求：
+	1	C++ 因子类模板继承：
+	◦	所有因子类必须继承 Factor<Param>，并使用 FACTOR_INIT(FactorName) 宏初始化。
+	◦	Param 结构体定义因子所需的参数。
+	2	字段映射：
+	◦	C++ 中使用 get_factor<FactorSecOrderBook>()、get_factor<FactorSecTradeAgg>() 等获取 nonfactor，if (nonfac == nullptr) { throw std::runtime_error("get nonfactor error!"); } 来确保非因子实例存在。
+	◦	数据通过 nonfac->xxx_list 访问。
+	3	算子使用：
+	◦	必须使用 框架内算子，如 compute::sum(), compute::mean(), compute::diff() 等进行计算。
+	4	窗口处理：
+	◦	使用 SlidingWindow<T> 对数据进行窗口计算操作，底层用向量化计算，避免手写循环。
 
 ---
 
@@ -125,6 +128,30 @@ PROMPR_FACTOR_L3_CPP = """
 
      * 在 `on_init()` 中，用参数（比如 `param().SECONDS`）指定窗口长度；
      * 在 `calculate()` 中按 tick 推进，`push()` 新值，再对整个窗口调用 `compute` 算子。
+
+   * 常用计算算子如下：
+      调用方式：compute::算子名()
+
+      | 算子 | 功能 |
+      |-----|------|
+      | mean | 计算平均值 |
+      | std | 标准差 |
+      | var | 方差 |
+      | median | 中位数 |
+      | quantile | 分位数 |
+      | diff | 计算相邻元素的差值 |
+      | ema | 指数移动平均 |
+      | corr | 相关性 |
+      | cov | 协方差 |
+      | max/min | 最大值、最小值 |
+      | imax/imin | 最大值、最小值的索引 |
+      | add/sub | 向量加减 |
+      | mul/div | 向量相乘、相除 |
+      | kurtosis | 峰度 |
+      | skewness | 偏度 |
+      | sum | 求和 |
+      | ewa | 指数加权平均 |
+
 
 5. **对 Python 中“时间或窗口函数”的映射**
 
@@ -211,12 +238,101 @@ PROMPR_FACTOR_L3_CPP = """
 
    * 避免伪代码，确保语法完整、类型明确；
    * 所有用到的字段、窗口、中间变量都必须先声明后使用。
+   * 确保C++ 代码能够编译运行
 
 3. **nonfactor 选择与字段映射必须清晰、一致**
 
    * 如果 Python 因子依赖 `FactorSecTradeAgg`，C++ 必须使用相同 nonfactor 名；
    * 字段名与 Python nonfactor 一致，如 `trade_buy_money_list` -> `nonfac->trade_buy_money_list`。
 
+4.**校验逻辑一致性**
+
+   * 确保 C++ 因子的行为与 Python 因子行为一致，特别是在数据访问、计算公式和窗口处理上；
+
+
 请在理解以上所有规范后，再进行代码生成。你的最终回答只能包含一份完整的 C++ 因子实现源码。
+
+以下是一个C++因子的实例：
+```cpp
+
+#include "huatai/atsquant/factor/all_factor_types.h"
+#include "huatai/atsquant/factor/base_factor.h"
+#include "huatai/atsquant/factor/compute.h"
+
+#include "huatai/atsquant/factor/nonfactor/FactorSecOrderBook.h"
+#include <cstddef>
+namespace huatai::atsquant::factor {
+struct FactorBookSell15Move1QtyDeltaDy0TickQtyRatioParam {
+  int64_t SECONDS = 300;
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FactorBookSell15Move1QtyDeltaDy0TickQtyRatioParam, SECONDS)
+
+class FactorBookSell15Move1QtyDeltaDy0TickQtyRatio : public Factor<FactorBookSell15Move1QtyDeltaDy0TickQtyRatioParam> {
+  std::shared_ptr<FactorSecOrderBook> nonfac;
+
+public:
+  FACTOR_INIT(FactorBookSell15Move1QtyDeltaDy0TickQtyRatio)
+  // static const int SECONDS = 300;
+
+  // 对于窗口数据，都选用SlidingWindow数据结构,在创建时就指定了窗口大小
+  SlidingWindow<double> bigger_ask_vol_qty_queue;
+  SlidingWindow<double> ask_vol_qty_queue;
+  void on_init() override {
+    bigger_ask_vol_qty_queue=SlidingWindow<double>{static_cast<size_t>(param().SECONDS)};
+    ask_vol_qty_queue= SlidingWindow<double>{static_cast<size_t>(param().SECONDS)};
+    nonfac = get_factor<FactorSecOrderBook>();
+    if (nonfac == nullptr) {
+      throw std::runtime_error("get nonfactor FactorSecOrderBook error!");
+    }
+  }
+
+  Status calculate() override {
+
+    value() = 0;
+
+    // 获取nonfactor采样1s的依赖盘口数据，取最新价字段，
+    auto size_len = nonfac->last_px_list.size();
+    if (size_len < 2) {
+      value() = 0;
+      auto last_tick = get_market_data().get_prev_n_quote(2);
+      bigger_ask_vol_qty_queue.push(0);
+      ask_vol_qty_queue.push(compute::sum(last_tick.list_item<QuoteSchema::Index::ASK_QTY>(), 10));
+      return Status::OK();
+    }
+   /////////////////（1）以下为获取nonfactor采样1s的行情数据(首选)///////////////////////
+	 // 获取nonfactor采样1s的依赖盘口数据，取十档卖方数量，
+    const auto last_ask_qty = nonfac->ask_qty_list[size_len - 2];
+    const auto current_ask_qty = nonfac->ask_qty_list.back();
+
+   //   使用框架compute算子，计算前5档委托数量的总和
+  // 因为nonfac->ask_qty_list和ask_vol_qty_queue都是SlidingWindow的数据结构，在创建时已经指定了窗口大小, 
+    auto sum_ask_v = compute::sum(nonfac->ask_qty_list, 5);
+    auto sum_ask_vol_qty = compute::sum(ask_vol_qty_queue, 5);
+
+    	
+    // 从nonfactor采样1s的依赖的逐笔聚合1s数据，取成交成交统计量
+    size_t idx = nonfac->trade_buy_volume_list.size();
+    auto trade_buy_volume_1s = nonfac->trade_buy_volume_list[idx - 1];// 获取最近1s买方成交的统计量
+    auto trade_sell_volume_1s = nonfac->trade_sell_volume_list[idx - 1];// 获取最近1s买方成交的统计量
+
+     // 使用框架算子示例：
+    auto volumes = quote.item<QuoteSchema::Index::BidVolume>();
+    auto avg_vol = compute::mean(volumes);
+
+   /////////////////（2）以下为获取原始行情数据(次选，会重新遍历逐笔，计算量大)///////////////////////
+   //获取前n个的tick数据
+    auto row_tick = get_market_data().get_prev_n_quote(1);
+    // 获取前n秒的trade数据
+    auto row_trade = get_market_data().get_prev_n_sec_trade(param().interval);
+    value() = 0;
+    // 获取盘口的买一和卖一价格
+    auto current_tick_ask_p0 = row_tick.list_item<QuoteSchema::Index::ASK_PRICE>()[0];
+    auto current_tick_bid_p0 = row_tick.list_item<QuoteSchema::Index::BID_PRICE>()[0];
+    return Status::OK();
+  }
+};
+FACTOR_REGISTER(FactorBookSell15Move1QtyDeltaDy0TickQtyRatio)
+} // namespace huatai::atsquant::factor
+```
 
 """

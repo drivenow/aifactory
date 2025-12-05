@@ -61,9 +61,9 @@ NONFACTOR_META_DATA = {
 # Mapping names to relative file paths
 _BASE_DIR = Path(__file__).resolve().parent
 NONFACTOR_PATHS = {
-    "FactorSecOrderBook": str(_BASE_DIR / "NonFactors/FactorSecOrderBook.py"),
-    "FactorSecTradeAgg": str(_BASE_DIR / "NonFactors/FactorSecTradeAgg.py"),
-    "FactorSecOrderAgg": str(_BASE_DIR / "NonFactors/FactorSecOrderAgg.py"),
+    "FactorSecOrderBook": str(_BASE_DIR / "py_nonfactor/FactorSecOrderBook.py"),
+    "FactorSecTradeAgg": str(_BASE_DIR / "py_nonfactor/FactorSecTradeAgg.py"),
+    "FactorSecOrderAgg": str(_BASE_DIR / "py_nonfactor/FactorSecOrderAgg.py"),
 }
 
 
@@ -119,7 +119,7 @@ def get_formatted_nonfactor_info() -> str:
     Directly reads all NonFactor source codes and returns a formatted string
     to be injected into the prompt.
     """
-    lines = ["【Available NonFactors Source Code】"]
+    lines = ["【Available py_nonfactor Source Code】"]
     
     for name, path in NONFACTOR_PATHS.items():
         lines.append(f"\n--- {name} ---")
