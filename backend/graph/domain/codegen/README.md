@@ -55,3 +55,34 @@
     code = generate_factor_code_from_spec(state)
     ```
     预期输出：返回一个带 `compute_factor` 的 Pandas 模板字符串，包含 rolling mean 逻辑。
+
+- **批量 Python→C++ 转换脚本**
+  - 位置：`backend/graph/domain/codegen/scripts/batch_py_to_cpp.py`
+  - 用途：遍历指定目录下的 `.py` 因子文件，推断类名（`class Xxx(FactorBase)`），将代码作为上下文交给 C++ agent 生成对应 C++ 源码，并写入输出目录。
+  - 使用示例：
+    ```bash
+    python -m backend.graph.domain.codegen.scripts.batch_py_to_cpp \
+      --src /path/to/py_factors \
+      --out /path/to/output_cpp \
+      --overwrite  # 可选，存在同名文件时覆盖
+    ```
+  - 输出：按因子名生成 `FactorName.cpp` 文件；若 agent 未配置会返回占位 C++ 代码，需在 SDK 环境验证。
+
+- **批量 JSON → Python 因子生成脚本**
+  - 位置：`backend/graph/domain/codegen/scripts/batch_json_to_py.py`
+  - 用途：读取 JSON 中的因子描述，批量生成 Python L3 因子代码。
+  - JSON 格式示例（数组或包含 `items` 数组）：
+    ```json
+    [
+      {"factor_name": "FactorAlpha1", "user_spec": "买卖金额差/和归一化"},
+      {"name": "FactorAlpha2", "desc": "5秒内涨幅均值", "factor_code": ""}  // 可选附带已有代码
+    ]
+    ```
+  - 使用示例：
+    ```bash
+    python -m backend.graph.domain.codegen.scripts.batch_json_to_py \
+      --json /path/to/factors.json \
+      --out /path/to/output_py \
+      --overwrite  # 可选，存在同名文件时覆盖
+    ```
+  - 输出：按因子名生成 `FactorName.py` 文件（继承 `FactorBase` 的 L3 因子），可配合 `runner.run_factor` 做 stub mock 运行。
