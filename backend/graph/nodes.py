@@ -126,7 +126,7 @@ def run_factor_dryrun(state: FactorAgentState) -> Dict[str, Any]:
     trace = result.get("traceback")
 
     print(
-        f"[DBG] run_factor_dryrun thread={state.get('thread_id')} "
+        f"[DBG] run_factor_dryrun thread={state.get('thread_id')} , error={result.get('error', None)}"
         f"success={success} retry_count={state.get('retry_count', 0)}"
     )
 
@@ -192,10 +192,10 @@ def human_review_gate(state: FactorAgentState) -> Dict[str, Any]:
     """
     人工审核节点（HITL）
     - 发起 interrupt，把 req 传出去
-    - 恢复后统一解析前端回传：
-      新协议 action+payload 优先，旧协议 status 兜底
+    - 恢复后统一解析前端回传payload(带thread_id), 后端进行处理：
+      新协议 action+payload 优先，
     """
-    # 默认需要中断；仅当 explicitly 关闭 enable_interrupt 时自动通过
+    # 默认需要中断
     enable_interrupt = state.get("enable_interrupt", True)
     if not enable_interrupt:
         final_code = state.get("factor_code") or ""
@@ -216,22 +216,11 @@ def human_review_gate(state: FactorAgentState) -> Dict[str, Any]:
         "actions": str(HumanReviewStatus.__args__),
         "retry_count": int(state.get("retry_count", 0)),
     }
-
-    # 第一次进入：中断并把 req 发给前端；如果已有响应则复用, 主要用于测试用例模拟中断
-    # if state.get("ui_response") is None:
-    #     """
-    #     失败的节点直接 route 回 human_review_gate，但没有清理 ui_response，
-    #     导致 human_review_gate 以为“已经有人回过了”而不再 interrupt，一直复用第一条 "edit" 响应，
-    #     在 run_factor_dryrun 和 human_review_gate 之间无限循环，最终触发 LangGraph 的 GraphRecursionError。
-    #     """
     ui_resp_raw = interrupt(req)
-    # else:
-    #     ui_resp_raw = state.get("ui_response")
-
     # 允许前端传 string/json/dict 等多形态
     ui_resp, status, edited_code = normalize_review_response(ui_resp_raw)
 
-    # ===== 新旧协议统一层（推荐 action+payload）=====
+    # =====（推荐 action+payload）=====
     action = None
     payload = {}
 
@@ -239,10 +228,6 @@ def human_review_gate(state: FactorAgentState) -> Dict[str, Any]:
     if isinstance(ui_resp, dict) and ui_resp.get("action"):
         action = ui_resp.get("action")
         payload = ui_resp.get("payload") or {}
-
-    # 2) 旧协议兜底：{status, review_comment, edited_code}
-    if action is None:
-        print(f"[DBG] human_review_gate old protocol status={status}")
 
     action_norm = action or status or "reject"
     review_comment = payload.get("review_comment") if isinstance(payload, dict) else None
