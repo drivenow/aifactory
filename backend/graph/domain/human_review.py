@@ -1,4 +1,4 @@
-# backend/graph/domain/review.py
+# backend/graph/domain/human_review.py
 from __future__ import annotations
 
 import json

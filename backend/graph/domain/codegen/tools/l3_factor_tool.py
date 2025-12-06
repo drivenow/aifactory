@@ -3,10 +3,10 @@ from __future__ import annotations
 import ast
 import traceback
 import sys
+import types
 from typing import Any, Dict, List, Optional
-
 from langchain_core.tools import tool
-# --- Mocks & Stubs ---
+from contextlib import contextmanager
 
 def build_mock_tick_data(length: int = 5) -> List[Dict[str, Any]]:
     ticks = []
@@ -29,7 +29,12 @@ class FactorBase:
         self.factorManager = factorManager
         self.marketDataManager = marketDataManager
         self._values = []
-        self._mock_ticks = __mock_data__ or []
+        # Store all mock ticks, but only expose up to _current_tick_index
+        self._all_mock_ticks = __mock_data__ or []
+        self._current_tick_index = -1
+
+    def _set_current_tick_index(self, index):
+        self._current_tick_index = index
 
     def addFactorValue(self, v):
         try:
@@ -39,20 +44,27 @@ class FactorBase:
 
     # ---- Tick ----
     def getPrevTick(self, field):
-        if not self._mock_ticks: return None
-        return self._mock_ticks[-1].get(field)
+        if self._current_tick_index < 0: return None
+        # Return data from the current tick (simulating "latest available")
+        # Or if "Prev" implies strict past, we might need index-1. 
+        # Usually in backtest "PrevTick" often means the current incoming tick or the last snapshot.
+        # Let's assume it means the current tick being processed.
+        tick = self._all_mock_ticks[self._current_tick_index]
+        return tick.get(field)
 
     def getPrevNTick(self, field, n):
-        if not self._mock_ticks: return []
-        return [t.get(field) for t in self._mock_ticks[-int(n):]]
+        if self._current_tick_index < 0: return []
+        end = self._current_tick_index + 1
+        start = max(0, end - int(n))
+        return [t.get(field) for t in self._all_mock_ticks[start:end]]
     
     # ---- Helpers ----
     def get_sample_1s_flag(self):
         return 1
     
     def get_timestamp(self):
-        if not self._mock_ticks: return 0
-        return self._mock_ticks[-1].get("Timestamp", 0)
+        if self._current_tick_index < 0: return 0
+        return self._all_mock_ticks[self._current_tick_index].get("Timestamp", 0)
 
     def get_factor_instance(self, name):
         if self.factorManager:
@@ -141,9 +153,6 @@ def _syntax_check(code: str) -> Dict[str, Any]:
     except Exception as e:
         return {"ok": False, "error": f"Check failed: {str(e)}"}
 
-import sys
-import types
-from contextlib import contextmanager
 
 @contextmanager
 def mock_l3_modules(factor_base_cls):
@@ -198,13 +207,13 @@ def mock_l3_modules(factor_base_cls):
             else:
                 del sys.modules[key]
 
-def _mock_run(code: str) -> Dict[str, Any]:
+def _mock_run(code: str, data_length: int = 100) -> Dict[str, Any]:
     try:
         # 1. Prepare Namespace
         ns = {}
         
         # Inject mock data
-        mock_ticks = build_mock_tick_data(10)
+        mock_ticks = build_mock_tick_data(data_length)
         ns["__mock_data__"] = mock_ticks
         
         # 2. Execute Stub Definitions
@@ -245,9 +254,17 @@ def _mock_run(code: str) -> Dict[str, Any]:
         # factorManager is passed as 2nd arg in stub __init__
         instance = target_cls(config={}, factorManager=fm, marketDataManager=None)
         
-        # Run calculate
-        # Call it a few times to simulate a loop if needed, but here just once
-        instance.calculate()
+        # Run calculate Loop
+        # Simulate tick-by-tick execution
+        total_ticks = len(mock_ticks)
+        
+        for i in range(total_ticks):
+            # Update internal state to point to current tick
+            if hasattr(instance, '_set_current_tick_index'):
+                instance._set_current_tick_index(i)
+            
+            # Execute user logic for this tick
+            instance.calculate()
         
         return {"ok": True, "result": instance._values}
         
@@ -266,10 +283,11 @@ def l3_syntax_check(code: str) -> Dict[str, Any]:
     return _syntax_check(code)
 
 @tool("l3_mock_run")
-def l3_mock_run(code: str) -> Dict[str, Any]:
+def l3_mock_run(code: str, data_length: int = 100) -> Dict[str, Any]:
     """
     Executes the L3 factor code in a mock stub environment.
     Verifies runtime logic without external dependencies.
     Returns execution success status and the calculated values (or error traceback).
     """
-    return _mock_run(code)
+    return _mock_run(code, data_length)
+

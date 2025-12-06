@@ -14,7 +14,7 @@ from .codegen import (
 )
 
 from .eval import compute_eval_metrics, write_factor_and_metrics
-from .review import build_human_review_request, normalize_review_response
+from .human_review import build_human_review_request, normalize_review_response
 from .logic_gen import extract_spec_and_name
 
 __all__ = [
