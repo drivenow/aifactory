@@ -6,7 +6,7 @@
 - **State 形态**：`FactorAgentState` 为 TypedDict 聚合（非 MessagesState），含 `messages/route/retry_count/factor_code/dryrun_result/check_semantics/human_review_status/ui_request/ui_response/eval_metrics/db_write_status` 等；`enable_interrupt` 默认 True 但未用于路由；无 artifacts/overwrite_fields/短摘要实现。
 - **代码生成**：`generate_factor_code_from_spec` 仅在有 LLM 时调用 `create_react_agent`（工具：`render_factor`/`propose_body`/`dryrun_code`），输出通过正则提取代码块；无 LLM 时回落 `simple_factor_body_from_spec` + 模板渲染。模板 `load_data` 返回静态 DataFrame。
 - **试跑/沙盒**：`sandbox_run_code` 直接 `exec`，开放 `pandas/numpy/os/__builtins__`，无 AST 过滤、时间/资源/网络限制；`run_factor_dryrun` 使用固定入参调用 `run_factor`。
-- **语义检查**：`is_semantic_check_ok` 仅返回 `state.check_semantics`，默认通过，无实际校验。
+- **语义检查**：`check_semantics_static` 仅返回 `state.check_semantics`，默认通过，无实际校验。
 - **评估/入库**：`backfill_and_eval` 调用 `mock_evals` 产出 ic/turnover/group_perf；`write_db` 调 `mock_evals.write_factor_and_metrics_mock`，未接入 agentevals 数据集或 CI 门槛。
 - **协议/前端**：当前仅编译 graph；未接入 ag-ui-langgraph/FastAPI SSE，CopilotKit 侧未落地；HITL 事件未对齐 AG-UI 标准。
 - **测试**：`backend/tests/test_codegen_agent.py` 验证模板/回落生成与 run_factor_dryrun；`backend/tests/test_graph_flow.py` 走完 approve 流程，确保 run_factor_dryrun 成功、产生 eval_metrics 和 db_write_status。

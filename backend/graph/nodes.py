@@ -10,7 +10,9 @@ from domain import (
     extract_spec_and_name,
     generate_factor_code_from_spec,
     run_factor,
-    is_semantic_check_ok,
+    DryrunResult,
+    SemanticCheckResult,
+    check_semantics_static,
     compute_eval_metrics,
     write_factor_and_metrics,
     build_human_review_request,
@@ -51,7 +53,7 @@ def _route_retry_or_human_review(
         return {
             **update,
             "retry_count": current,
-            "enable_interrupt": True,
+            "enable_interrupt": state.get("enable_interrupt", True),
             "route": "human_review_gate",
         }
 
@@ -123,17 +125,22 @@ def generate_factor_code(state: FactorAgentState) -> Dict[str, Any]:
 def run_factor_dryrun(state: FactorAgentState) -> Dict[str, Any]:
     result = run_factor(state)
     success = bool(result.get("success"))
-    trace = result.get("result")
+    stdout_text = result.get("stdout")
+    stderr_text = result.get("stderr")
 
     print(
         f"[DBG] run_factor_dryrun thread={state.get('thread_id')} , "
-        f"success={success}, result={trace}, retry_count={state.get('retry_count', 0)}"
+        f"success={success}, stdout={stdout_text}, stderr={stderr_text}, retry_count={state.get('retry_count', 0)}"
     )
 
     if success:
         return {
-            "dryrun_result": {"success": True, "stdout": trace},
-            "check_semantics": {"last_error": None},
+            "dryrun_result": DryrunResult(
+                success=True,
+                stdout=str(stdout_text) if stdout_text is not None else None,
+                stderr=str(stderr_text) if stderr_text is not None else None,
+            ).model_dump(),
+            "check_semantics": SemanticCheckResult().model_dump(),
             "last_success_node": "run_factor_dryrun",
             "state_error": None,
             "route": "check_semantics",
@@ -142,14 +149,16 @@ def run_factor_dryrun(state: FactorAgentState) -> Dict[str, Any]:
     return _route_retry_or_human_review(
         state,
         {
-            "dryrun_result": {
-                "success": False,
-                "result": result.get("result"),
-            },
-            "check_semantics": {
-                "pass": False,
-                "last_error": trace,
-            },
+            "dryrun_result": DryrunResult(
+                success=False,
+                stdout=str(stdout_text) if stdout_text is not None else None,
+                stderr=str(stderr_text) if stderr_text is not None else None,
+            ).model_dump(),
+            "check_semantics": SemanticCheckResult(
+                passed=False,
+                reason=[str(stderr_text)] if stderr_text else [],
+                last_error=str(stderr_text) if stderr_text else None,
+            ).model_dump(),
             "state_error": ["run_factor_dryrun failed"],
             "last_success_node": "run_factor_dryrun",
         },
@@ -158,13 +167,13 @@ def run_factor_dryrun(state: FactorAgentState) -> Dict[str, Any]:
 
 
 def check_semantics(state: FactorAgentState) -> Dict[str, Any]:
-    check_result, check_detail = is_semantic_check_ok(state)
+    check_result, check_detail = check_semantics_static(state)
 
     print(f"[DBG] check_semantics thread={state.get('thread_id')} ok={check_result} detail={check_detail}")
 
     if check_result:    
         return {
-            "check_semantics": check_detail or {"pass": True},
+            "check_semantics": check_detail or SemanticCheckResult().model_dump(),
             "last_success_node": "check_semantics",
             "state_error": None,
             "route": "human_review_gate",
@@ -172,10 +181,11 @@ def check_semantics(state: FactorAgentState) -> Dict[str, Any]:
 
     update = {
         "check_semantics": check_detail
-        or {
-            "pass": False,
-            "reason": "spec/code/run_factor_dryrun mismatch",
-        },
+        or SemanticCheckResult(
+            passed=False,
+            reason=["spec/code/run_factor_dryrun mismatch"],
+            last_error="spec/code/run_factor_dryrun mismatch",
+        ).model_dump(),
         "state_error": ["check_semantics failed"],
         "last_success_node": "check_semantics",
     }
@@ -258,9 +268,13 @@ def human_review_gate(state: FactorAgentState) -> Dict[str, Any]:
             return {
                 **base_update,
                 "route": "run_factor_dryrun",
-                # 可选：把旧的 run_factor_dryrun/check_semantics 结果清空或标记为过期
-                "dryrun_result": {},
-                "semantic_ok": False,
+                # 把旧的 run_factor_dryrun/check_semantics 结果清空或标记为过期
+                "dryrun_result": DryrunResult().model_dump(),
+                "check_semantics": SemanticCheckResult(
+                    passed=False,
+                    reason=["等待重新运行 dryrun 后再做语义检查"],
+                    last_error=None,
+                ).model_dump(),
             }
 
     # ---- review 只给意见 → 回到 generate_factor_code ----
@@ -303,6 +317,12 @@ def human_review_gate(state: FactorAgentState) -> Dict[str, Any]:
 
 
 def backfill_and_eval(state: FactorAgentState) -> Dict[str, Any] :
+    # Normalize optional dict fields to satisfy strict validation
+    state = {
+        **state,
+        "ui_request": state.get("ui_request") or {},
+        "ui_response": state.get("ui_response") or {},
+    }
     # 这里可以选择性全量校验一次（高价值节点）
     FactorAgentStateModel.from_state(state)
 

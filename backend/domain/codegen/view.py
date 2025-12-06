@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import Any, List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 try:
     from global_state import FactorAgentState, ViewBase
 except (ImportError, ValueError):  # pragma: no cover
@@ -24,15 +24,15 @@ class CodeMode(str, Enum):
 
 
 class SemanticCheckResult(BaseModel):
-    passed: bool = True
-    reason: List[str] = []
-    last_error: Optional[str] = None
+    passed: bool = True  # 语义分析是否通过
+    reason: List[str] = Field(default_factory=list)  # 语义分析的成功或者失败原因
+    last_error: Optional[str] = None  # 语义检查失败原因摘要（可选）
 
 
 class DryrunResult(BaseModel):
-    success: bool = True
-    stdout: Optional[str] = None
-    stderr: Optional[str] = None
+    success: bool = True  # 代码执行是否成功
+    stdout: Optional[str] = None  # 代码执行的标准输出
+    stderr: Optional[str] = None  # 代码执行的标准错误输出
 
 
 class CodeGenView(ViewBase):
@@ -42,8 +42,8 @@ class CodeGenView(ViewBase):
     factor_name: str = "factor"
     factor_code: str = ""
     code_mode: CodeMode = CodeMode.PANDAS
-    dryrun_result: DryrunResult = DryrunResult(success=True)
-    check_semantics: SemanticCheckResult = SemanticCheckResult()
+    dryrun_result: DryrunResult = Field(default_factory=DryrunResult)
+    check_semantics: SemanticCheckResult = Field(default_factory=SemanticCheckResult)
 
     @classmethod
     @ViewBase._wrap_from_state("CodeGenView.from_state")
@@ -52,12 +52,16 @@ class CodeGenView(ViewBase):
 
         def _parse_dryrun(d):
             if not d:
-                return DryrunResult(success=True)
+                return DryrunResult()
+            if isinstance(d, DryrunResult):
+                return d
             return DryrunResult(**d)
 
         def _parse_semantic(d):
             if not d:
                 return SemanticCheckResult()
+            if isinstance(d, SemanticCheckResult):
+                return d
             return SemanticCheckResult(**d)
 
         return cls(

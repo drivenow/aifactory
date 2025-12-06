@@ -15,7 +15,7 @@ from .codegen import (
     generate_factor_code_from_spec,
     run_factor,
     run_factor_dryrun,
-    is_semantic_check_ok,
+    check_semantics_static,
     build_l3_codegen_agent,
     create_agent,
 )
@@ -32,7 +32,7 @@ __all__ = [
     "generate_factor_code_from_spec",
     "run_factor",
     "run_factor_dryrun",
-    "is_semantic_check_ok",
+    "check_semantics_static",
     "build_l3_codegen_agent",
     "create_agent",
     "compute_eval_metrics",

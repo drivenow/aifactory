@@ -8,14 +8,14 @@
 - `validator.py`：语义检查/结果标准化，输出布尔 + detail。
 - `scripts/`：批量脚本，如 `batch_py_to_cpp.py`（遍历因子代码转 C++）、`batch_json_to_py.py`（JSON 描述批量生 Python 因子）。
 
-调用顺序建议：collect_spec → generator.generate_factor_code_from_spec → runner.run_factor → validator.is_semantic_check_ok（失败态附带 reason/last_error）。替换某一环时，只要保持输入输出契约即可。
+调用顺序建议：collect_spec → generator.generate_factor_code_from_spec → runner.run_factor → validator.check_semantics_static（失败态附带 reason/last_error）。替换某一环时，只要保持输入输出契约即可。
 
 ## 用法速览
 
 - **Python L3 因子生成**
   - 设置 `CodeGenView.code_mode = CodeMode.L3_PY`，提供 `factor_name`、`user_spec`（可选 `factor_code` 作为修正上下文）。
   - 调用 `generator.generate_factor_code_from_spec(state)` 返回 Python L3 因子源码；内部注入 Python nonfactor 字段/源码提示，使用 LangChain Agent 生成。
-  - 可用 `runner.run_factor(state)` 在 stub L3 环境 mock 运行；`validator.is_semantic_check_ok(state)` 做语义校验。
+  - 可用 `runner.run_factor(state)` 在 stub L3 环境 mock 运行；`validator.check_semantics_static(state)` 做语义校验。
   - 示例输入：
     ```python
     state = {

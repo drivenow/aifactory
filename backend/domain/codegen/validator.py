@@ -5,7 +5,7 @@ from typing import Dict, Tuple
 from domain.codegen.view import CodeGenView, CodeMode, SemanticCheckResult
 
 
-def is_semantic_check_ok(state) -> Tuple[bool, Dict]:
+def check_semantics_static(state) -> Tuple[bool, Dict]:
     view = CodeGenView.from_state(state)
 
     if view.code_mode == CodeMode.L3_PY or view.code_mode == "l3_py":
@@ -29,10 +29,11 @@ def is_semantic_check_ok(state) -> Tuple[bool, Dict]:
         )
         return passed, result.model_dump()
 
-    # pandas 模式保持兼容
     detail = view.check_semantics or SemanticCheckResult()
-    if isinstance(detail, SemanticCheckResult):
-        return detail.passed, detail.model_dump()
+    if not isinstance(detail, SemanticCheckResult):
+        detail = SemanticCheckResult(**detail)
+    return detail.passed, detail.model_dump()
 
-    ok = detail.get("passed", detail.get("pass", True))
-    return ok, detail
+
+def check_semantics_agent(state) -> Tuple[bool, Dict]:
+    pass

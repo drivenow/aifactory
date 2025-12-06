@@ -18,12 +18,10 @@ def run_factor(state) -> Dict[str, Any]:
                 val_preview = val_preview[:1000] + "... (truncated)"
             return {
                 "success": True,
-                "result": res.get("result"),
                 "stdout": f"[L3 Mock Result]\n{val_preview}",
             }
         return {
             "success": False,
-            "result": res.get("state_error"),
             "stderr": res.get("state_error"),
         }
     if view.code_mode == CodeMode.L3_CPP or view.code_mode == "l3_cpp":
@@ -32,11 +30,25 @@ def run_factor(state) -> Dict[str, Any]:
             "stderr": "C++ 因子暂不支持本地 mock 运行，请在 SDK 环境中编译执行。",
         }
 
-    return sandbox_run_code(
+    sandbox_res = sandbox_run_code(
         view.factor_code,
         entry="run_factor",
         args={"args": ["2020-01-01", "2020-01-10", ["A"]], "kwargs": {}},
     )
+    if sandbox_res.get("success"):
+        result_preview = str(sandbox_res.get("result"))
+        if len(result_preview) > 200:
+            result_preview = result_preview[:200] + "... (truncated)"
+        return {
+            "success": True,
+            "stdout": result_preview,
+            "stderr": None,
+        }
+    return {
+        "success": False,
+        "stdout": None,
+        "stderr": sandbox_res.get("result"),
+    }
 
 
 def run_factor_dryrun(state) -> Dict[str, Any]:
