@@ -5,3 +5,10 @@ pydantic>=2.12.4
 fastapi>=0.121.1
 numpy>=1.23.0
 pandas>=1.5.0
+polars>=1.5.0
+cryptography
+pycryptodome
+pymysql
+memory_profiler
+line_profiler
+DBUtils==1.3

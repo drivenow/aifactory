@@ -5,8 +5,8 @@ from typing import Dict, Any, Optional, List
 from langgraph.graph import END
 from langgraph.types import interrupt
 
-from .global_state import FactorAgentState, FactorAgentStateModel, HumanReviewStatus
-from .domain import (
+from global_state import FactorAgentState, FactorAgentStateModel, HumanReviewStatus
+from domain import (
     extract_spec_and_name,
     generate_factor_code_from_spec,
     run_factor,
@@ -85,7 +85,7 @@ def collect_spec_from_messages(state: FactorAgentState) -> Dict[str, Any]:
         "retry_count": int(state.get("retry_count", 0)),
         "code_mode": state.get("code_mode") or "pandas",
         "last_success_node": "collect_spec_from_messages",
-        "error": None,
+        "state_error": None,
         "route": "generate_factor_code",
     }
 
@@ -102,7 +102,7 @@ def generate_factor_code(state: FactorAgentState) -> Dict[str, Any]:
         return {
             "factor_code": code,
             "last_success_node": "generate_factor_code",
-            "error": None,
+            "state_error": None,
             "route": "run_factor_dryrun",
         }
 
@@ -113,7 +113,7 @@ def generate_factor_code(state: FactorAgentState) -> Dict[str, Any]:
         return _route_retry_or_human_review(
             state,
             {
-                "error": {"node": "generate_factor_code", "message": str(e)},
+                "state_error": ["generate_factor_code error: "+ str(e)],
                 "last_success_node": "generate_factor_code",
             },
             target_if_retry="generate_factor_code",
@@ -123,19 +123,19 @@ def generate_factor_code(state: FactorAgentState) -> Dict[str, Any]:
 def run_factor_dryrun(state: FactorAgentState) -> Dict[str, Any]:
     result = run_factor(state)
     success = bool(result.get("success"))
-    trace = result.get("traceback")
+    trace = result.get("result")
 
     print(
-        f"[DBG] run_factor_dryrun thread={state.get('thread_id')} , error={result.get('error', None)}"
-        f"success={success} retry_count={state.get('retry_count', 0)}"
+        f"[DBG] run_factor_dryrun thread={state.get('thread_id')} , "
+        f"success={success}, result={trace}, retry_count={state.get('retry_count', 0)}"
     )
 
     if success:
         return {
-            "dryrun_result": {"success": True, "stdout": result.get("stdout", "")},
+            "dryrun_result": {"success": True, "stdout": trace},
             "check_semantics": {"last_error": None},
             "last_success_node": "run_factor_dryrun",
-            "error": None,
+            "state_error": None,
             "route": "check_semantics",
         }
 
@@ -144,14 +144,13 @@ def run_factor_dryrun(state: FactorAgentState) -> Dict[str, Any]:
         {
             "dryrun_result": {
                 "success": False,
-                "traceback": result.get("traceback"),
-                "stderr": result.get("stderr", ""),
+                "result": result.get("result"),
             },
             "check_semantics": {
                 "pass": False,
                 "last_error": trace,
             },
-            "error": {"node": "run_factor_dryrun", "message": "run_factor_dryrun failed"},
+            "state_error": ["run_factor_dryrun failed"],
             "last_success_node": "run_factor_dryrun",
         },
         target_if_retry="generate_factor_code",
@@ -167,7 +166,7 @@ def check_semantics(state: FactorAgentState) -> Dict[str, Any]:
         return {
             "check_semantics": check_detail or {"pass": True},
             "last_success_node": "check_semantics",
-            "error": None,
+            "state_error": None,
             "route": "human_review_gate",
         }
 
@@ -177,10 +176,7 @@ def check_semantics(state: FactorAgentState) -> Dict[str, Any]:
             "pass": False,
             "reason": "spec/code/run_factor_dryrun mismatch",
         },
-        "error": {
-            "node": "check_semantics",
-            "message": "check_semantics failed",
-        },
+        "state_error": ["check_semantics failed"],
         "last_success_node": "check_semantics",
     }
     update2 = _route_retry_or_human_review(state, update, target_if_retry="generate_factor_code")
@@ -246,7 +242,7 @@ def human_review_gate(state: FactorAgentState) -> Dict[str, Any]:
             "factor_code": final_code,
             "review_comment": review_comment,
             "last_success_node": "human_review_gate",
-            "error": None,
+            "state_error": None,
             "retry_count": 0, # 人工审核通过后，重置 retry_count
         }
 
@@ -276,7 +272,7 @@ def human_review_gate(state: FactorAgentState) -> Dict[str, Any]:
             "human_review_status": "review",
             "review_comment": comment,
             "last_success_node": "human_review_gate",
-            "error": None,
+            "state_error": None,
             "route": "generate_factor_code",
         }
 
@@ -288,7 +284,7 @@ def human_review_gate(state: FactorAgentState) -> Dict[str, Any]:
             "human_review_status": "reject",
             "review_comment": review_comment,
             "last_success_node": "human_review_gate",
-            "error": None,
+            "state_error": None,
             "route": "finish",
         }
     else:
@@ -300,10 +296,7 @@ def human_review_gate(state: FactorAgentState) -> Dict[str, Any]:
             "human_review_status": "reject",
             "review_comment": review_comment,
             "last_success_node": "human_review_gate",
-            "error": {
-                "node": "human_review_gate",
-                "message": f"invalid ui_response action={action!r}",
-            },
+            "state_error": [f"human_review_gate invalid ui_response action={action!r}"],
             "route": "finish",
         }
 
@@ -322,7 +315,7 @@ def backfill_and_eval(state: FactorAgentState) -> Dict[str, Any] :
     return {
         "eval_metrics": metrics,
         "last_success_node": "backfill_and_eval",
-        "error": None,
+        "state_error": None,
         "route": "write_db",
     }
 
@@ -338,7 +331,7 @@ def write_db(state: FactorAgentState) -> Dict[str, Any] :
     return {
         "db_write_status": res.get("status", "success"),
         "last_success_node": "write_db",
-        "error": None,
+        "state_error": None,
         "route": "finish",
     }
 

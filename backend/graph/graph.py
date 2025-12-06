@@ -4,7 +4,7 @@ from __future__ import annotations
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
-from backend.graph.global_state import FactorAgentState
+from global_state import FactorAgentState
 from backend.graph import nodes
 
 

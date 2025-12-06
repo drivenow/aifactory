@@ -80,11 +80,9 @@ add_langgraph_fastapi_endpoint(app, graph, "/agent") 会自动生成 AG-UI 兼�
 
 (2) 健康检查
 - GET /agent/health
-- Human-in-loop 回传接口 路径通常是 /agent/human-feedback 或 /agent/feedback
 
-(3)确认 human-feedback 的准确路径
-启动服务后打开：
-http://localhost:8000/docs
+(3)查看接口详情，启动服务后打开：
+http://localhost:8001/docs
 """
 if __name__ == "__main__":
     main()

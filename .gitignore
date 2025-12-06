@@ -181,3 +181,4 @@ secrets/
 .next/
 node_modules/
 tmp/
+thirdparty/
