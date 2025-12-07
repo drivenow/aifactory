@@ -4,7 +4,8 @@ from typing import Any, List, Optional
 from langchain_core.messages import SystemMessage, HumanMessage
 from domain.llm import create_agent, _extract_last_assistant_content, _unwrap_agent_code
 from domain.codegen.prompts.factor_l3_py import PROMPT_FACTOR_L3_PY
-from domain.codegen.prompts.factor_l3_cpp import PROMPR_FACTOR_L3_CPP
+from domain.codegen.prompts.factor_l3_cpp import PROMPT_FACTOR_L3_CPP
+from domain.codegen.prompts.semantic_check import SEMANTIC_CHECK_PROMPT
 # from .tools.codebase_fs_tools import read_repo_file, list_repo_dir
 from domain.codegen.tools import (
     l3_syntax_check, 
@@ -12,11 +13,12 @@ from domain.codegen.tools import (
     get_formatted_nonfactor_info_py,
     get_formatted_nonfactor_info_cpp,
 )
-from domain.codegen.view import CodeGenView
+from domain.codegen.view import CodeGenView, DryrunResult, SemanticCheckResult
 
 
 _L3_AGENT: Optional[Any] = None
 _L3_CPP_AGENT: Optional[Any] = None
+_SEMANTIC_AGENT: Optional[Any] = None
 
 
 def build_l3_codegen_agent():
@@ -102,7 +104,7 @@ def invoke_l3_cpp_agent(view: CodeGenView) -> str:
             f"class {view.factor_name} {{}};\n"
         )
 
-    formatted_prompt = PROMPR_FACTOR_L3_CPP.replace(
+    formatted_prompt = PROMPT_FACTOR_L3_CPP.replace(
         "{nonfactor_infos}", get_formatted_nonfactor_info_cpp()
     )
     sys = SystemMessage(content=formatted_prompt)
@@ -115,3 +117,69 @@ def invoke_l3_cpp_agent(view: CodeGenView) -> str:
         return _unwrap_agent_code(txt, lang="cpp").strip()
     except Exception as e:
         return f"// ERROR: Agent invoke failed: {e}\n"
+
+
+def build_semantic_agent():
+    """LLM agent for semantic validation (no external tools)."""
+    global _SEMANTIC_AGENT
+    if _SEMANTIC_AGENT is not None:
+        return _SEMANTIC_AGENT
+    _SEMANTIC_AGENT = create_agent(tools=[])
+    return _SEMANTIC_AGENT
+
+
+def invoke_semantic_agent(view: CodeGenView, dryrun: DryrunResult) -> SemanticCheckResult:
+    """调用语义审核 agent，返回标准化结果。"""
+    agent = build_semantic_agent()
+    if agent is None:
+        # fallback handled in caller
+        return SemanticCheckResult(passed=False, reason=["semantic agent unavailable"], last_error="semantic agent unavailable")
+
+    user_content = (
+        f"因子名称: {view.factor_name}\n"
+        f"用户需求: {view.user_spec}\n"
+        "因子代码:\n"
+        f"```python\n{view.factor_code}\n```\n"
+        "运行输出:\n"
+        f"stdout:\n{dryrun.stdout or ''}\n"
+        f"stderr:\n{dryrun.stderr or ''}\n"
+    )
+    sys = SystemMessage(content=SEMANTIC_CHECK_PROMPT)
+    user = HumanMessage(content=user_content)
+
+    try:
+        out = agent.invoke({"messages": [sys, user]})
+        msgs = out.get("messages") or []
+        txt = _extract_last_assistant_content(msgs)
+        return _parse_semantic_json(txt)
+    except Exception as e:
+        return SemanticCheckResult(passed=False, reason=[f"semantic agent error: {e}"], last_error=str(e))
+
+
+def _parse_semantic_json(txt: str) -> SemanticCheckResult:
+    import json, re
+    text = txt or ""
+    try:
+        obj = json.loads(text)
+        return _semantic_from_mapping(obj)
+    except Exception:
+        pass
+    m = re.search(r"\{[\s\S]*\}", text)
+    if m:
+        try:
+            obj = json.loads(m.group(0))
+            return _semantic_from_mapping(obj)
+        except Exception:
+            pass
+    lowered = text.lower()
+    passed = "true" in lowered and "false" not in lowered
+    reason = [text.strip()] if text.strip() else []
+    return SemanticCheckResult(passed=passed, reason=reason, last_error="; ".join(reason) if reason else None)
+
+
+def _semantic_from_mapping(obj):
+    passed = bool(obj.get("passed"))
+    reason = obj.get("reason") or obj.get("reasons") or []
+    if isinstance(reason, str):
+        reason = [reason]
+    return SemanticCheckResult(passed=passed, reason=reason, last_error="; ".join(reason) if reason else None)

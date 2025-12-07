@@ -163,16 +163,34 @@ curl -s -X GET http://localhost:8001/agent/health
 
 ## 主要文件与代码参考
 
-*   **后端入口与路由**: `backend/app.py`
-*   **LangGraph 图**: `backend/graph/graph.py`
-*   **节点实现**: `backend/graph/nodes.py`
-*   **沙盒执行**: `backend/global_tools/sandbox_runner.py`
-*   **因子代码生成入口**：`backend/domain/codegen/runner.py`（`CodeMode="mock"` / `"l3"`），L3 因子代码生成工具 `backend/domain/codegen/tools/l3_factor_tool.py`
-*   **因子评价入口**：`backend/domain/evaluate/runner.py`（`eval_type="mock"` / `"l3"`），L3 因子评价工具 `backend/domain/evaluate/tools/l3_factor_evals.py`
-*   **因子模板**: `backend/domain/codegen/tools/factor_template.py`（mock）
-*   **因子模板L3**：`backend/domain/codegen/tools/l3_factor_tool.py`（语法/运行校验）、`backend/domain/codegen/tools/nonfactor_info.py`（依赖因子字段与源码）
-*   **前端 runtime 路由**: `frontend/app/api/copilotkit/route.ts`
-*   **页面与组件**: `frontend/app/factor-copilot/page.tsx`、`frontend/components/*`
+### Domain (业务领域层)
+**目录**: `backend/domain/`
+**功能**: 包含脱离 LangGraph 也能独立运行的核心业务逻辑，主要负责因子生成与评价。它封装了对底层因子框架 (FactorLib) 和评价框架的调用。
+*   `codegen/` (因子代码生成):
+    *   `runner.py`: 代码生成主入口，支持 Mock 和真实 L3 模式 (`CodeMode`)。
+    *   `generator.py`: 基于 Prompt 和 LLM 生成因子代码。
+    *   `validator.py`: 语义检查，确保代码符合预期的输入输出规范。
+    *   `tools/l3_factor_tool.py`: 提供 L3 系统的语法检查与模拟运行工具。
+*   `evaluate/` (因子评价):
+    *   `runner.py`: 评价执行主入口。
+    *   `tools/l3_factor_evals.py`: 调用 L3 评价系统计算 IC、换手率等指标。
+
+### Graph (编排层)
+**目录**: `backend/graph/`
+**功能**: 基于 LangGraph 定义业务流程的状态机与节点流转逻辑。
+*   `graph.py`: 定义 StateGraph 结构，配置节点 (`add_node`) 和边 (`add_edge`/`add_conditional_edges`)。
+*   `nodes.py`: 实现具体的图节点函数 (如 `generate_factor_code`, `human_review_gate`)，负责调度 Domain 层的功能并更新 State。
+*   `state.py` / `global_state.py`: 定义 `FactorAgentState` 数据结构，作为全图共享的上下文。
+
+### Tools (工具层)
+**目录**: `backend/global_tools/` (或分散在各 domain 的 `tools/` 下)
+**功能**: 提供通用的基础设施工具。
+*   `sandbox_runner.py`: 负责在隔离环境中执行生成的 Python 代码，捕获 stdout/stderr 和异常，确保安全运行。
+
+### 其他重要文件
+*   **后端入口**: `backend/app.py` - 集成 FastAPI 与 LangGraph，暴露 HTTP 接口。
+*   **前端路由**: `frontend/app/api/copilotkit/route.ts` - CopilotKit Runtime 适配器。
+*   **前端页面**: `frontend/app/factor-copilot/page.tsx` - 主交互界面。
 
 ## 运行小结
 

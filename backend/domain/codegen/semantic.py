@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from typing import Dict, Tuple
+import os
 
-from domain.codegen.view import CodeGenView, CodeMode, SemanticCheckResult
+from domain.codegen.agent import invoke_semantic_agent
+from domain.codegen.view import CodeGenView, CodeMode, SemanticCheckResult, DryrunResult
 
 
 def check_semantics_static(state) -> Tuple[bool, Dict]:
@@ -36,4 +38,19 @@ def check_semantics_static(state) -> Tuple[bool, Dict]:
 
 
 def check_semantics_agent(state) -> Tuple[bool, Dict]:
-    pass
+    """调用语义 agent 检查运行结果和代码，容错降级。"""
+    view = CodeGenView.from_state(state)
+    enabled = os.getenv("ENABLE_SEMANTIC_AGENT", "false").lower() in ("1", "true", "yes")
+    dr = view.dryrun_result or DryrunResult()
+    if not isinstance(dr, DryrunResult):
+        dr = DryrunResult(**dr)
+
+    # 如果未启用语义 agent，则基于 dryrun 结果做最小判定
+    if not enabled:
+        passed = bool(dr.success)
+        reason = [] if passed else ["dryrun failed and semantic agent disabled"]
+        res = SemanticCheckResult(passed=passed, reason=reason, last_error="; ".join(reason) if reason else None)
+        return passed, res.model_dump()
+
+    parsed = invoke_semantic_agent(view, dr)
+    return parsed.passed, parsed.model_dump()
