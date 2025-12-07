@@ -1,3 +1,17 @@
+from __future__ import annotations
+
+from typing import Any, Optional
+
+from langchain_core.messages import HumanMessage, SystemMessage
+from domain.codegen.tools import (
+    get_formatted_nonfactor_info_py,
+    l3_mock_run,
+    l3_syntax_check,
+)
+from domain.codegen.view import CodeGenView
+from domain.llm import _extract_last_assistant_content, _unwrap_agent_code, create_agent
+
+
 PROMPT_FACTOR_L3_PY = """你是一个量化高频因子工程师助手，使用 Python 和 L3FactorFrame 框架开发因子。
 
 【基础框架约束】
@@ -88,3 +102,73 @@ class FactorBuyWillingByPrice(FactorBase):
 - 不要输出解释文字、推理过程或工具调用结果。
 - 代码必须是可独立保存为 FactorXxx.py 的内容。
 """
+
+_L3_AGENT: Optional[Any] = None
+
+
+def build_l3_codegen_agent():
+    """Build or reuse cached L3 ReAct agent."""
+    global _L3_AGENT
+    if _L3_AGENT is not None:
+        return _L3_AGENT
+
+    tools = [
+        l3_syntax_check,
+        l3_mock_run,
+    ]
+
+    _L3_AGENT = create_agent(tools=tools)
+    return _L3_AGENT
+
+
+def build_l3_py_user_message(view: CodeGenView) -> HumanMessage:
+    sem = view.check_semantics
+    last_error = sem.last_error if sem else ""
+    if sem and sem.reason and not last_error:
+        last_error = "; ".join(sem.reason)
+    dryrun = view.dryrun_result
+
+    user_content = (
+        f"因子类名: {view.factor_name}\n"
+        f"因子需求描述: {view.user_spec}\n"
+        f"因子代码: {view.factor_code}\n" if view.factor_code else ""
+    )
+    if last_error:
+        user_content += f"\n[上一轮错误摘要]\n{last_error[:2000]}\n"
+    if dryrun and (dryrun.stdout or dryrun.stderr):
+        user_content += "\n[上一轮运行信息]\n"
+        if dryrun.stdout:
+            user_content += f"stdout:\n{str(dryrun.stdout)[:2000]}\n"
+        if dryrun.stderr:
+            user_content += f"stderr:\n{str(dryrun.stderr)[:2000]}\n"
+
+    return HumanMessage(content=user_content)
+
+
+def invoke_l3_agent(view: CodeGenView) -> str:
+    """使用 L3 专用 ReAct agent 生成 FactorBase 规范代码。"""
+    agent = build_l3_codegen_agent()
+    if agent is None:
+        # 简单回退：生成一个占位因子，避免空结果影响流程
+        return (
+            "from L3FactorFrame.FactorBase import FactorBase\n\n"
+            f"class {view.factor_name}(FactorBase):\n"
+            "    def __init__(self, config, factorManager, marketDataManager):\n"
+            "        super().__init__(config, factorManager, marketDataManager)\n"
+            "    def calculate(self):\n"
+            "        self.addFactorValue(0.0)\n"
+        )
+
+    formatted_prompt = PROMPT_FACTOR_L3_PY.replace(
+        "{nonfactor_infos}", get_formatted_nonfactor_info_py()
+    )
+    sys = SystemMessage(content=formatted_prompt)
+    user = build_l3_py_user_message(view)
+
+    try:
+        out = agent.invoke({"messages": [sys, user]})
+        msgs = out.get("messages") or []
+        txt = _extract_last_assistant_content(msgs)
+        return _unwrap_agent_code(txt).strip()
+    except Exception as e:
+        return f"ERROR: Agent invoke failed: {e}\nclass {view.factor_name}(FactorBase):\n    pass"

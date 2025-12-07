@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Dict, Tuple
 import os
 
-from domain.codegen.agent import invoke_semantic_agent
+from domain.codegen.agent_with_prompt import agent_semantic_check
 from domain.codegen.view import CodeGenView, CodeMode, SemanticCheckResult, DryrunResult
 
 
@@ -52,5 +52,5 @@ def check_semantics_agent(state) -> Tuple[bool, Dict]:
         res = SemanticCheckResult(passed=passed, reason=reason, last_error="; ".join(reason) if reason else None)
         return passed, res.model_dump()
 
-    parsed = invoke_semantic_agent(view, dr)
+    parsed = agent_semantic_check.invoke_semantic_agent(view, dr)
     return parsed.passed, parsed.model_dump()
