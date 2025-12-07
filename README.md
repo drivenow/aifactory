@@ -187,8 +187,7 @@ curl -s -X GET http://localhost:8001/agent/health
 │   │   ├── graph.py          # 状态图定义 (节点与边)
 │   │   ├── nodes.py          # 图节点具体实现
 │   │   └── state.py          # 全局状态定义 (FactorAgentState)
-│   └── generated_factors/    # 自动生成的因子代码输出目录
-│
+│   ├── global_state.py       # 全局状态管理 (如因子缓存、评价指标)
 ├── frontend/                 # 前端应用 (Next.js + CopilotKit)
 │   ├── app/
 │   │   ├── api/copilotkit/   # CopilotKit Runtime 适配器路由
