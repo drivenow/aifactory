@@ -13,7 +13,7 @@
 
 ### 2.1 核心流程
 - **`generator.py`** (Entry Point):
-  - 核心入口 `generate_factor_code_from_spec`。
+  - 核心入口 `generate_factor_with_semantic_guard`。
   - 编排 "生成 -> 静态检查 -> Dryrun -> Agent 语义检查" 的完整闭环。
 - **`view.py`** (Data Model):
   - 定义 `CodeGenView` 和 `FactorAgentState`，统一输入输出契约。
@@ -51,7 +51,7 @@
 适用于快速原型开发和验证。
 
 ```python
-from domain.codegen.generator import generate_factor_code_from_spec
+from domain.codegen.generator import generate_factor_with_semantic_guard
 from domain.codegen.view import CodeMode
 
 state = {
@@ -61,7 +61,7 @@ state = {
 }
 
 # 生成代码（包含自动修正流程）
-code = generate_factor_code_from_spec(state)
+code = generate_factor_with_semantic_guard(state)
 print(code)
 ```
 **预期输出**：继承 `FactorBase` 的 Python 类，自动注入 `FactorSecTradeAgg` 等 NonFactor 依赖。
@@ -78,7 +78,7 @@ state = {
     "code_mode": CodeMode.L3_CPP,
 }
 
-code = generate_factor_code_from_spec(state)
+view = generate_factor_with_semantic_guard(state)
 ```
 **预期输出**：包含 `struct Param` 定义、继承 `Factor<Param>` 的 C++ 类，使用 `SlidingWindow` 和 `compute::` 算子。
 

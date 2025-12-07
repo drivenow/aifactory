@@ -21,6 +21,7 @@ from ag_ui_langgraph import (
 import uvicorn
 
 from backend.graph.graph import graph  # ✅ 统一从这里拿 Graph 实例
+from backend.logger import project_logger
 
 
 app = FastAPI(title="langgraph demo with agui")
@@ -55,12 +56,12 @@ add_langgraph_fastapi_endpoint(app, agent, "/agent")
 async def log_requests(request, call_next):
     """简单的请求日志中间件，方便调试"""
     try:
-        print("[DBG] request", request.method, request.url.path)
+        project_logger.info(f"[DBG] request {request.method} {request.url.path}")
     except Exception:
         pass
     response = await call_next(request)
     try:
-        print("[DBG] response", request.url.path, response.status_code)
+        project_logger.info(f"[DBG] response {request.url.path} {response.status_code}")
     except Exception:
         pass
     return response
@@ -69,7 +70,12 @@ async def log_requests(request, call_next):
 def main():
     """启动 uvicorn 服务（开发模式）"""
     port = int(os.getenv("PORT", "8001"))
-    uvicorn.run("backend.app:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run("backend.app:app", host="0.0.0.0", port=port, reload=True, 
+    reload_excludes=[
+            "backend/domain/codegen/generated_factors/*",
+            "backend/domain/codegen/generated_factors/*/*",
+        ],
+    )
 
 
 """

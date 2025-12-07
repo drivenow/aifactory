@@ -78,25 +78,24 @@ class CodeGenView(ViewBase):
         如果语义检查通过且代码执行成功，返回成功信息，包括用户需求描述、生成的代码。
         否则，返回失败信息，包括用户需求描述、生成的代码、语义检查结果、代码执行结果。
         """
-        lines = []
+        lines = ["+--------------------------------------------------------+"]
         if self.check_semantics.passed and self.dryrun_result.success:
             lines.append(f"[SUCCESS] 因子 {self.factor_name} 语义检查通过！")
-            lines.append(f"{'-'*30} [User Spec] {'-'*30}")
+            lines.append(f"[User Spec]")
             lines.append(self.user_spec.strip())
-            lines.append(f"\n{'-'*30} [Generated Code] {'-'*30}")
+            lines.append(f"[Generated Code]")
             lines.append(self.factor_code)
         else:
             lines.append(f"[FAIL] 因子 {self.factor_name} 检查未通过")
             
-            lines.append(f"\n{'-'*30} [Dryrun Result] {'-'*30}")
+            lines.append(f"[Dryrun Result]")
             lines.append(self.dryrun_result.model_dump_json(indent=2))
             
-            lines.append(f"\n{'-'*30} [Semantic Check] {'-'*30}")
+            lines.append(f"[Semantic Check]")
             lines.append(self.check_semantics.model_dump_json(indent=2))
-            
-            lines.append(f"\n{'-'*30} [Current Code] {'-'*30}")
+            lines.append(f"[Current Code]")
             lines.append(self.factor_code)
-        
+        lines += ["+--------------------------------------------------------+"]
         return "\n".join(lines)
 
     def save_code_to_file(self, base_dir: str = None) -> str:
@@ -118,7 +117,8 @@ class CodeGenView(ViewBase):
             The absolute path to the saved file.
         """
         if base_dir is None:
-            base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "generated_factors")
+            base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../generated_factors")
+        print(base_dir)
         
         # Determine subdirectory and file extension based on code_mode
         if self.code_mode in (CodeMode.L3_CPP, "l3_cpp"):
@@ -150,9 +150,9 @@ class CodeGenView(ViewBase):
             return DryrunResult()
         if isinstance(d, DryrunResult):
             return d
-        assert isinstance(dryrun_result, dict), "dryrun_result must be a DryrunResult or a dict"
-        assert "success" in dryrun_result, "dryrun_result must contain 'success' key"
-        assert "stdout" in dryrun_result or "stderr" in dryrun_result, "dryrun_result must contain 'stdout' or 'stderr' key"
+        assert isinstance(d, dict), "dryrun_result must be a DryrunResult or a dict"
+        assert "success" in d, "dryrun_result must contain 'success' key"
+        assert "stdout" in d or "stderr" in d, "dryrun_result must contain 'stdout' or 'stderr' key"
         return DryrunResult(**d)
 
     @classmethod
@@ -161,9 +161,9 @@ class CodeGenView(ViewBase):
             return SemanticCheckResult()
         if isinstance(d, SemanticCheckResult):
             return d
-        assert isinstance(semantic_check_result, dict), "semantic_check_result must be a SemanticCheckResult or a dict"
-        assert "passed" in semantic_check_result, "semantic_check_result must contain 'passed' key" 
-        assert "reason" in semantic_check_result, "semantic_check_result must contain 'reason' key"
+        assert isinstance(d, dict), "semantic_check_result must be a SemanticCheckResult or a dict"
+        assert "passed" in d, "semantic_check_result must contain 'passed' key" 
+        assert "reason" in d, "semantic_check_result must contain 'reason' key"
         return SemanticCheckResult(**d)
 
     @classmethod

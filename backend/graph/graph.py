@@ -4,6 +4,7 @@ from __future__ import annotations
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
+from backend.logger import project_logger
 from global_state import FactorAgentState
 from backend.graph import nodes
 
@@ -27,7 +28,6 @@ def build_graph() -> StateGraph:
     g.add_node("collect_spec_from_messages", nodes.collect_spec_from_messages)
     g.add_node("generate_factor_code", nodes.generate_factor_code)
     g.add_node("run_factor_dryrun", nodes.run_factor_dryrun)
-    g.add_node("check_semantics", nodes.check_semantics)
     g.add_node("human_review_gate", nodes.human_review_gate)
     g.add_node("backfill_and_eval", nodes.backfill_and_eval)
     g.add_node("write_db", nodes.write_db)
@@ -46,11 +46,11 @@ def build_graph() -> StateGraph:
 
     collect_spec_from_messages / backfill_and_eval / write_db / finish
     主干最好静态边，异常/重试用 Command 。
-    generate_factor_code / run_factor_dryrun / check_semantics
+    generate_factor_code / run_factor_dryrun 
 
     一个简单的选型口诀（本图采用 route+conditional edges）：
     - 主干：collect_spec_from_messages / backfill_and_eval / write_db / finish 使用静态边
-    - 分支：generate_factor_code / run_factor_dryrun / check_semantics / human_review_gate 由 route 控制跳转
+    - 分支：generate_factor_code / run_factor_dryrun  / human_review_gate 由 route 控制跳转
     """
     g.set_entry_point("collect_spec_from_messages")
     g.add_edge("collect_spec_from_messages", "generate_factor_code")
@@ -69,12 +69,7 @@ def build_graph() -> StateGraph:
     g.add_conditional_edges(
         "run_factor_dryrun",
         next_route,
-        ["check_semantics", "generate_factor_code", "human_review_gate"],
-    )
-    g.add_conditional_edges(
-        "check_semantics",
-        next_route,
-        ["human_review_gate", "generate_factor_code"],
+        ["generate_factor_code", "human_review_gate"],
     )
     g.add_conditional_edges(
         "human_review_gate",
@@ -99,7 +94,7 @@ if __name__ == "__main__":
         graph_image = graph.get_graph().draw_mermaid_png()
         with open("workflow.png", "wb") as f:
             f.write(graph_image)
-        print("流程图已保存为 workflow.png")
+        project_logger.info("流程图已保存为 workflow.png")
     except Exception as e:
-        print("[WARN] draw graph failed:", e)
+        project_logger.warning(f"[WARN] draw graph failed: {e}")
 

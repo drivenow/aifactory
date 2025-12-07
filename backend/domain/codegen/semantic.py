@@ -70,5 +70,14 @@ def check_semantics_agent(state: CodeGenView | FactorAgentState) -> Tuple[bool, 
         dr = DryrunResult(**dr)
 
     # 调用语义 agent 检查运行结果和代码
-    parsed = agent_semantic_check.invoke_semantic_agent(view, dr)
-    return parsed.passed, parsed.model_dump()
+    if view.code_mode == CodeMode.PANDAS:
+        passed = True
+        detail = SemanticCheckResult(
+            passed=passed,
+            reason=[],
+            last_error="",
+        )
+        return passed, detail.model_dump()
+    else:
+        parsed = agent_semantic_check.invoke_semantic_agent(view, dr)
+        return parsed.passed, parsed.model_dump()

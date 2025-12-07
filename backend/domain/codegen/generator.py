@@ -10,6 +10,7 @@ from domain.codegen.agent_with_prompt import agent_factor_l3_cpp, agent_factor_l
 from domain.codegen.view import CodeGenView, CodeMode, DryrunResult, SemanticCheckResult
 from domain.codegen.semantic import check_semantics_static, check_semantics_agent
 from domain.codegen.runner import run_factor
+from domain.logger import domain_logger
 
 
 def generate_l3_factor_code(view: CodeGenView) -> str:
@@ -18,12 +19,6 @@ def generate_l3_factor_code(view: CodeGenView) -> str:
 
 def generate_l3_cpp_factor_code(view: CodeGenView) -> str:
     return agent_factor_l3_cpp.invoke_l3_cpp_agent(view)
-
-
-def generate_factor_code_from_spec(state: CodeGenView | FactorAgentState, check_agent_round = 3) -> str:
-    """生成因子代码（兼容旧接口），内部执行完整语义守护流程并返回代码字符串。"""
-    res = generate_factor_with_semantic_guard(state, check_agent_round)
-    return res.factor_code
 
 
 def generate_factor_with_semantic_guard(state: CodeGenView | FactorAgentState, check_agent_round = 3) -> CodeGenView:
@@ -59,18 +54,15 @@ def generate_factor_with_semantic_guard(state: CodeGenView | FactorAgentState, c
         view.set_dryrun_result(dryrun_result)
 
         # 打印美观的分隔符
-        separator = "=" * 80
-        print(f"\n{separator}")
-        print(view)
-        print(separator + "\n")
+        domain_logger.info(f"\n{str(view)}")
         
         if view.check_semantics.passed and view.dryrun_result.success:
              # 成功后，将代码持久化到文件（如果指定了 factor_path 或默认路径）
             try:
                 saved_path = view.save_code_to_file()
-                print(f"[INFO] Factor code saved to: {saved_path}")
+                domain_logger.info(f"Factor code saved to: {saved_path}")
             except Exception as e:
-                print(f"[WARN] Failed to save factor code: {e}")
+                domain_logger.warning(f"Failed to save factor code: {e}")
             break
             
         agent_attempts += 1
@@ -142,7 +134,7 @@ class FactorTestFactor(FactorBase):
             code_mode=CodeMode.L3_CPP,
         )
         code = generate_l3_cpp_factor_code(view)
-        print(code)
+        domain_logger.info(code)
     else:
         view = CodeGenView(
             factor_name="TestFactor",
@@ -150,4 +142,4 @@ class FactorTestFactor(FactorBase):
             code_mode=CodeMode.L3_PY,
         )
         code = generate_l3_factor_code(view)
-        print(code)
+        domain_logger.info(code)

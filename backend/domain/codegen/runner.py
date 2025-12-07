@@ -40,18 +40,15 @@ def run_factor(state: CodeGenView | FactorAgentState) -> Dict[str, Any]:
     view = CodeGenView.from_state(state)
     if view.code_mode == CodeMode.L3_PY or view.code_mode == "l3_py":
         res = _mock_run(view.factor_code)
-        if res.get("ok"):
-            # Map L3 result to stdout for display compatibility
-            val_preview = str(res.get("result"))
-            if len(val_preview) > 1000:
-                val_preview = val_preview[:1000] + "... (truncated)"
+        if res.success:
             return {
                 "success": True,
-                "stdout": "",
+                "stdout": res.stdout,
             }
+        view.set_dryrun_result(res)
         return {
             "success": False,
-            "stderr": res.get("state_error"),
+            "stderr": res.stderr,
         }
     if view.code_mode == CodeMode.L3_CPP or view.code_mode == "l3_cpp":
         return {

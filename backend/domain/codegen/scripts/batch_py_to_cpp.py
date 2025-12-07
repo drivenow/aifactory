@@ -8,6 +8,7 @@ from typing import List, Optional
 
 from domain.codegen.generator import generate_factor_with_semantic_guard
 from domain.codegen.view import CodeMode, CodeGenView
+from domain.logger import domain_logger
 
 
 def infer_factor_name(code_text: str, fallback: str) -> str:
@@ -34,7 +35,7 @@ def convert_file(py_path: Path, out_dir: Path, overwrite: bool) -> Optional[Path
     
     out_path = out_dir / f"{factor_name}.cpp"
     if out_path.exists() and not overwrite:
-        print(f"[skip] {out_path} already exists (use --overwrite to replace)")
+        domain_logger.info(f"[skip] {out_path} already exists (use --overwrite to replace)")
         return None
 
     state = {
@@ -52,7 +53,7 @@ def convert_file(py_path: Path, out_dir: Path, overwrite: bool) -> Optional[Path
         return Path(view.factor_path) if view.factor_path else out_path
     else:
         # If generation failed semantic checks, we might still want to inspect the result or log error
-        print(f"[warn] Generation for {factor_name} failed checks: {view.check_semantics.reason}")
+        domain_logger.warning(f"[warn] Generation for {factor_name} failed checks: {view.check_semantics.reason}")
         return None
 
 
@@ -71,22 +72,22 @@ def main(argv: Optional[List[str]] = None) -> int:
     out_dir = Path(args.out).resolve()
 
     if not src_dir.exists() or not src_dir.is_dir():
-        print(f"[error] Source dir not found: {src_dir}")
+        domain_logger.error(f"[error] Source dir not found: {src_dir}")
         return 1
 
     py_files = collect_python_files(src_dir)
     if not py_files:
-        print(f"[info] No python files found under {src_dir}")
+        domain_logger.info(f"[info] No python files found under {src_dir}")
         return 0
 
-    print(f"[info] Found {len(py_files)} python files, converting...")
+    domain_logger.info(f"[info] Found {len(py_files)} python files, converting...")
     for p in py_files:
         try:
             out_path = convert_file(p, out_dir, args.overwrite)
             if out_path:
-                print(f"[ok] {p.name} -> {out_path}")
+                domain_logger.info(f"[ok] {p.name} -> {out_path}")
         except Exception as e:
-            print(f"[error] Failed to convert {p}: {e}")
+            domain_logger.error(f"[error] Failed to convert {p}: {e}")
     return 0
 
 

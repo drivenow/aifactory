@@ -8,16 +8,16 @@ from langgraph.types import interrupt
 from global_state import FactorAgentState, FactorAgentStateModel, HumanReviewStatus
 from domain import (
     extract_spec_and_name,
-    generate_factor_code_from_spec,
+    generate_factor_with_semantic_guard,
     run_factor,
     DryrunResult,
     SemanticCheckResult,
-    check_semantics_static,
     compute_eval_metrics,
     write_factor_and_metrics,
     build_human_review_request,
     normalize_review_response,
 )
+from backend.logger import project_logger
 from .config import RETRY_MAX
 
 # -------------------------
@@ -76,7 +76,7 @@ def collect_spec_from_messages(state: FactorAgentState) -> Dict[str, Any]:
     """
     spec, name = extract_spec_and_name(state)
 
-    print(
+    project_logger.info(
         f"[DBG] collect_spec_from_messages thread={state.get('thread_id')} "
         f"spec_len={len(spec) if isinstance(spec, str) else 0} name={name}"
     )
@@ -94,22 +94,28 @@ def collect_spec_from_messages(state: FactorAgentState) -> Dict[str, Any]:
 
 def generate_factor_code(state: FactorAgentState) -> Dict[str, Any]:
     try:
-        code = generate_factor_code_from_spec(state)
+        view = generate_factor_with_semantic_guard(state)
 
-        print(
+        project_logger.info(
             f"[DBG] generate_factor_code thread={state.get('thread_id')} "
-            f"code_len={len(code) if isinstance(code, str) else 0}"
+            f"code_len={len(view.factor_code) if isinstance(view.factor_code, str) else 0}"
         )
 
         return {
-            "factor_code": code,
+            "factor_code": view.factor_code,
+            "factor_path": view.factor_path,
+            "code_mode": view.code_mode,
+            "check_semantics": view.check_semantics.model_dump(),
+            "dryrun_result": view.dryrun_result.model_dump(),
             "last_success_node": "generate_factor_code",
             "state_error": None,
             "route": "run_factor_dryrun",
         }
 
     except Exception as e:
-        print(
+        import traceback
+        print(traceback.print_exc())
+        project_logger.info(
             f"[DBG] generate_factor_code error thread={state.get('thread_id')} msg={str(e)}"
         )
         return _route_retry_or_human_review(
@@ -128,7 +134,7 @@ def run_factor_dryrun(state: FactorAgentState) -> Dict[str, Any]:
     stdout_text = result.get("stdout")
     stderr_text = result.get("stderr")
 
-    print(
+    project_logger.info(
         f"[DBG] run_factor_dryrun thread={state.get('thread_id')} , "
         f"success={success}, stdout={stdout_text}, stderr={stderr_text}, retry_count={state.get('retry_count', 0)}"
     )
@@ -140,10 +146,10 @@ def run_factor_dryrun(state: FactorAgentState) -> Dict[str, Any]:
                 stdout=str(stdout_text) if stdout_text is not None else None,
                 stderr=str(stderr_text) if stderr_text is not None else None,
             ).model_dump(),
-            "check_semantics": SemanticCheckResult().model_dump(),
+            "check_semantics": state.get("check_semantics", {}),
             "last_success_node": "run_factor_dryrun",
             "state_error": None,
-            "route": "check_semantics",
+            "route": "human_review_gate",
         }
 
     return _route_retry_or_human_review(
@@ -154,44 +160,12 @@ def run_factor_dryrun(state: FactorAgentState) -> Dict[str, Any]:
                 stdout=str(stdout_text) if stdout_text is not None else None,
                 stderr=str(stderr_text) if stderr_text is not None else None,
             ).model_dump(),
-            "check_semantics": SemanticCheckResult(
-                passed=False,
-                reason=[str(stderr_text)] if stderr_text else [],
-                last_error=str(stderr_text) if stderr_text else None,
-            ).model_dump(),
-            "state_error": ["run_factor_dryrun failed"],
+            "check_semantics": state.get("check_semantics", {}),
+            "state_error": ["run_factor_dryrun failed: "+str(stderr_text)],
             "last_success_node": "run_factor_dryrun",
         },
         target_if_retry="generate_factor_code",
     )
-
-
-def check_semantics(state: FactorAgentState) -> Dict[str, Any]:
-    check_result, check_detail = check_semantics_static(state)
-
-    print(f"[DBG] check_semantics thread={state.get('thread_id')} ok={check_result} detail={check_detail}")
-
-    if check_result:    
-        return {
-            "check_semantics": check_detail or SemanticCheckResult().model_dump(),
-            "last_success_node": "check_semantics",
-            "state_error": None,
-            "route": "human_review_gate",
-        }
-
-    update = {
-        "check_semantics": check_detail
-        or SemanticCheckResult(
-            passed=False,
-            reason=["spec/code/run_factor_dryrun mismatch"],
-            last_error="spec/code/run_factor_dryrun mismatch",
-        ).model_dump(),
-        "state_error": ["check_semantics failed"],
-        "last_success_node": "check_semantics",
-    }
-    update2 = _route_retry_or_human_review(state, update, target_if_retry="generate_factor_code")
-    print("[DBG] check_semantics fail update=", update2)
-    return update2
 
 
 def human_review_gate(state: FactorAgentState) -> Dict[str, Any]:
@@ -242,7 +216,7 @@ def human_review_gate(state: FactorAgentState) -> Dict[str, Any]:
     # ---- approve / edit 通过 ----
     if action_norm in ("approve", "edit"):
         final_code = edited_code or state.get("factor_code")
-        print(f"[DBG] human_review_gate approve/edit final_code={final_code}, retry_count reset to 0.")
+        project_logger.info(f"[DBG] human_review_gate approve/edit final_code={final_code}, retry_count reset to 0.")
         # 公共 update 字段
         base_update = {
             "ui_request": req,
@@ -302,7 +276,7 @@ def human_review_gate(state: FactorAgentState) -> Dict[str, Any]:
             "route": "finish",
         }
     else:
-        print(f"[DBG] human_review_gate invalid action={action_norm!r}")
+        project_logger.error(f"[DBG] human_review_gate invalid action={action_norm!r}")
         # ---- 兜底非法 action ----
         return {
             "ui_request": req,
@@ -327,7 +301,7 @@ def backfill_and_eval(state: FactorAgentState) -> Dict[str, Any] :
     FactorAgentStateModel.from_state(state)
 
     metrics = compute_eval_metrics(state)
-    print(
+    project_logger.info(
         f"[DBG] backfill_and_eval thread={state.get('thread_id')} "
         f"metrics_keys={list(metrics.keys())}"
     )
@@ -343,7 +317,7 @@ def backfill_and_eval(state: FactorAgentState) -> Dict[str, Any] :
 def write_db(state: FactorAgentState) -> Dict[str, Any] :
     res = write_factor_and_metrics(state)
 
-    print(
+    project_logger.info(
         f"[DBG] write_db thread={state.get('thread_id')} "
         f"status={res.get('status', 'unknown')}"
     )
@@ -357,7 +331,7 @@ def write_db(state: FactorAgentState) -> Dict[str, Any] :
 
 
 def finish(state: FactorAgentState) -> Dict[str, Any]:
-    print(f"[DBG] finish thread={state.get('thread_id')}")
+    project_logger.info(f"[DBG] finish thread={state.get('thread_id')}")
     return {}
 
 
@@ -368,7 +342,6 @@ def finish(state: FactorAgentState) -> Dict[str, Any]:
 - collect_spec_from_messages: 收集用户描述
 - generate_factor_code: 按模板生成代码
 - run_factor_dryrun: 沙盒运行
-- check_semantics: 语义检查
 - human_review_gate: AG-UI HITL（ui_request/ui_response）
 - backfill_and_eval: mock 回填评价
 - write_db: mock 入库

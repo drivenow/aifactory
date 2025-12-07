@@ -8,6 +8,7 @@ from typing import List, Optional, Dict, Any
 
 from domain.codegen.generator import generate_factor_with_semantic_guard
 from domain.codegen.view import CodeMode, CodeGenView
+from domain.logger import domain_logger
 
 
 def load_specs(json_path: Path) -> List[Dict[str, Any]]:
@@ -39,7 +40,7 @@ def convert_spec(spec: Dict[str, Any], out_dir: Path, overwrite: bool) -> Option
 
     out_path = out_dir / f"{factor_name}.py"
     if out_path.exists() and not overwrite:
-        print(f"[skip] {out_path} already exists (use --overwrite to replace)")
+        domain_logger.info(f"[skip] {out_path} already exists (use --overwrite to replace)")
         return None
 
     state = {
@@ -56,7 +57,7 @@ def convert_spec(spec: Dict[str, Any], out_dir: Path, overwrite: bool) -> Option
     if view.check_semantics.passed and view.dryrun_result.success:
          return Path(view.factor_path) if view.factor_path else out_path
     else:
-        print(f"[warn] Generation for {factor_name} failed checks: {view.check_semantics.reason}")
+        domain_logger.warning(f"[warn] Generation for {factor_name} failed checks: {view.check_semantics.reason}")
         return None
 
 
@@ -74,27 +75,27 @@ def main(argv: Optional[List[str]] = None) -> int:
     out_dir = Path(args.out).resolve()
 
     if not json_path.exists():
-        print(f"[error] JSON file not found: {json_path}")
+        domain_logger.error(f"[error] JSON file not found: {json_path}")
         return 1
 
     try:
         specs = load_specs(json_path)
     except Exception as e:
-        print(f"[error] Failed to parse JSON: {e}")
+        domain_logger.error(f"[error] Failed to parse JSON: {e}")
         return 1
 
     if not specs:
-        print("[info] No specs found in JSON")
+        domain_logger.info("[info] No specs found in JSON")
         return 0
 
-    print(f"[info] Loaded {len(specs)} specs, generating Python factors...")
+    domain_logger.info(f"[info] Loaded {len(specs)} specs, generating Python factors...")
     for spec in specs:
         try:
             out_path = convert_spec(spec, out_dir, args.overwrite)
             if out_path:
-                print(f"[ok] {spec.get('factor_name') or spec.get('name')} -> {out_path}")
+                domain_logger.info(f"[ok] {spec.get('factor_name') or spec.get('name')} -> {out_path}")
         except Exception as e:
-            print(f"[error] Failed to generate factor for spec {spec}: {e}")
+            domain_logger.error(f"[error] Failed to generate factor for spec {spec}: {e}")
     return 0
 
 

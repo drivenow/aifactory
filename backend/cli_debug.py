@@ -40,6 +40,7 @@ from langgraph.types import Command
 
 from backend.graph.graph import graph
 from backend.graph.global_state import FactorAgentState
+from backend.logger import project_logger
 
 
 def _unwrap_interrupt(payload: Any) -> Any:
@@ -91,13 +92,13 @@ def _prompt_code_review(payload: Dict[str, Any]) -> Dict[str, Any]:
     code = payload.get("code") or ""
     retry_count = payload.get("retry_count")
 
-    print("\n========== [HITL] 代码审核请求 ==========")
-    print(f"标题: {title}")
+    project_logger.info("\n========== [HITL] 代码审核请求 ==========")
+    project_logger.info(f"标题: {title}")
     if isinstance(retry_count, int):
-        print(f"当前自动重试次数: {retry_count}")
-    print("\n--- 因子代码 ---")
-    print(code)
-    print("------ 结束 ------\n")
+        project_logger.info(f"当前自动重试次数: {retry_count}")
+    project_logger.info("\n--- 因子代码 ---")
+    project_logger.info(code)
+    project_logger.info("------ 结束 ------\n")
 
     while True:
         print("请选择操作:")
@@ -137,10 +138,10 @@ def _prompt_code_review(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         # 4) edit: 编辑代码
         if choice == "4":
-            print("\n当前代码如下（仅供参考）：")
-            print("--------------------------------")
-            print(code)
-            print("--------------------------------")
+            project_logger.info("\n当前代码如下（仅供参考）：")
+            project_logger.info("--------------------------------")
+            project_logger.info(code)
+            project_logger.info("--------------------------------")
             print(
                 "\n请在下面输入修改后的完整代码（多行）。\n"
                 "输入单独一行 `###END###` 结束输入："
@@ -155,7 +156,7 @@ def _prompt_code_review(payload: Dict[str, Any]) -> Dict[str, Any]:
             new_code = "\n".join(lines).strip()
 
             if not new_code:
-                print("\n⚠️ 未输入任何内容，将保留原代码。")
+                project_logger.warning("\n⚠️ 未输入任何内容，将保留原代码。")
                 new_code = code
 
             return {
@@ -187,11 +188,11 @@ def _default_prompt_resume(payload: Any) -> Any:
     if isinstance(payload, dict) and payload.get("type") == "code_review":
         return _prompt_code_review(payload)
 
-    print("\n⏸️  Graph interrupted. Payload:")
+    project_logger.info("\n⏸️  Graph interrupted. Payload:")
     try:
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        project_logger.info(json.dumps(payload, ensure_ascii=False, indent=2))
     except Exception:
-        print(str(payload))
+        project_logger.error(str(payload))
 
     s = input("\n请输入 resume 值（回车=True；JSON 自动解析）：\n> ").strip()
 
@@ -243,7 +244,7 @@ def cli_debug_loop(
     configurable.setdefault("thread_id", thread_id)
     config["configurable"] = configurable
 
-    print(f"[CLI] 使用 thread_id = {thread_id}\n")
+    project_logger.info(f"[CLI] 使用 thread_id = {thread_id}\n")
 
     current_input: Any = init_input
 
@@ -258,8 +259,8 @@ def cli_debug_loop(
         raw = result.get("__interrupt__")
         if not raw:
             # 没有 __interrupt__ → 图已经正常结束
-            print("\n✅ Graph finished. 最终状态:")
-            print(json.dumps(result, ensure_ascii=False, indent=2))
+            project_logger.info("\n✅ Graph finished. 最终状态:")
+            project_logger.info(json.dumps(result, ensure_ascii=False, indent=2))
             return result
 
         # 有中断 → 解包 payload，交给 prompt_resume 决定下一步

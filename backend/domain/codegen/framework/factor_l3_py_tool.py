@@ -7,6 +7,7 @@ import types
 from typing import Any, Dict, List, Optional
 from langchain_core.tools import tool
 from contextlib import contextmanager
+from domain.codegen.view import SemanticCheckResult, DryrunResult
 
 def build_mock_tick_data(length: int = 5) -> List[Dict[str, Any]]:
     ticks = []
@@ -120,7 +121,7 @@ class FactorSecOrderAggStub:
 
 # --- Internal Logic ---
 
-def _syntax_check(code: str) -> Dict[str, Any]:
+def _syntax_check(code: str) -> SemanticCheckResult:
     try:
         tree = ast.parse(code)
         
@@ -142,16 +143,32 @@ def _syntax_check(code: str) -> Dict[str, Any]:
                                 has_calculate = True
         
         if not has_factor_base:
-            return {"ok": False, "state_error": "Must define a class inheriting from FactorBase"}
+            return SemanticCheckResult(
+                passed=False, 
+                reason=["Must define a class inheriting from FactorBase"],
+                last_error="Missing FactorBase inheritance"
+            )
         if not has_calculate:
-            return {"ok": False, "state_error": f"Class {class_name} must define a 'calculate' method"}
+            return SemanticCheckResult(
+                passed=False, 
+                reason=[f"Class {class_name} must define a 'calculate' method"],
+                last_error="Missing calculate method"
+            )
             
-        return {"ok": True, "class_name": class_name}
+        return SemanticCheckResult(passed=True, reason=[f"Class {class_name} checks passed"])
         
     except SyntaxError as e:
-        return {"ok": False, "state_error": f"Syntax Error: {e}"}
+        return SemanticCheckResult(
+            passed=False, 
+            reason=[f"Syntax Error: {e}"],
+            last_error=str(e)
+        )
     except Exception as e:
-        return {"ok": False, "state_error": f"Check failed: {str(e)}"}
+        return SemanticCheckResult(
+            passed=False, 
+            reason=[f"Check failed: {str(e)}"],
+            last_error=str(e)
+        )
 
 
 @contextmanager
@@ -207,7 +224,7 @@ def mock_l3_modules(factor_base_cls):
             else:
                 del sys.modules[key]
 
-def _mock_run(code: str, data_length: int = 100) -> Dict[str, Any]:
+def _mock_run(code: str, data_length: int = 100) -> DryrunResult:
     try:
         # 1. Prepare Namespace
         ns = {}
@@ -248,7 +265,10 @@ def _mock_run(code: str, data_length: int = 100) -> Dict[str, Any]:
                 break
         
         if not target_cls:
-            return {"ok": False, "state_error": "No FactorBase subclass found in executed code."}
+            return DryrunResult(
+                success=False,
+                stderr="No FactorBase subclass found in executed code."
+            )
         
         # Instantiate
         # factorManager is passed as 2nd arg in stub __init__
@@ -266,10 +286,17 @@ def _mock_run(code: str, data_length: int = 100) -> Dict[str, Any]:
             # Execute user logic for this tick
             instance.calculate()
         
-        return {"ok": True, "result": instance._values}
+        # Return success with the last few values as stdout representation
+        return DryrunResult(
+            success=True,
+            stdout=f"Execution successful. Calculated {len(instance._values)} values. Sample: {instance._values[:5]}..."
+        )
         
     except Exception:
-        return {"ok": False, "state_error": traceback.format_exc()}
+        return DryrunResult(
+            success=False,
+            stderr=traceback.format_exc()
+        )
 
 
 # --- Tools ---
@@ -280,7 +307,8 @@ def l3_syntax_check(code: str) -> Dict[str, Any]:
     Performs syntax and structural checks on L3 factor code.
     Ensures the code defines a class inheriting from FactorBase with a calculate method.
     """
-    return _syntax_check(code)
+    res = _syntax_check(code)
+    return res.model_dump()
 
 @tool("l3_mock_run")
 def l3_mock_run(code: str, data_length: int = 100) -> Dict[str, Any]:
@@ -289,5 +317,6 @@ def l3_mock_run(code: str, data_length: int = 100) -> Dict[str, Any]:
     Verifies runtime logic without external dependencies.
     Returns execution success status and the calculated values (or error traceback).
     """
-    return _mock_run(code, data_length)
+    res = _mock_run(code, data_length)
+    return res.model_dump()
 
