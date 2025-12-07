@@ -18,7 +18,7 @@ SEMANTIC_CHECK_PROMPT = """
 
 响应要求：
 - 仅输出 JSON，格式：{"passed": true/false, "reason": ["..."]}.
-- 不要输出其他内容。
+- 不要输出其他内容, 用中文来回答。
 """.strip()
 
 _SEMANTIC_AGENT: Optional[Any] = None

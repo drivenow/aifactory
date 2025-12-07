@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Dict, Any, Tuple
-
 from domain.codegen.tools.mock_factor_tool import (
     render_factor_code,
     simple_factor_body_from_spec,
@@ -21,87 +20,78 @@ def generate_l3_cpp_factor_code(view: CodeGenView) -> str:
     return agent_factor_l3_cpp.invoke_l3_cpp_agent(view)
 
 
-def generate_factor_code_from_spec(state, check_static_round = 3, check_agent_round = 3) -> str:
+def generate_factor_code_from_spec(state: CodeGenView | FactorAgentState, check_static_round = 3, check_agent_round = 3) -> str:
     """生成因子代码（兼容旧接口），内部执行完整语义守护流程并返回代码字符串。"""
     res = generate_factor_with_semantic_guard(state, check_static_round, check_agent_round)
-    return res.get("factor_code", "")
+    return res.factor_code
 
 
-def generate_factor_with_semantic_guard(state, check_static_round = 1, check_agent_round = 3) -> Dict[str, Any]:
-    """完整工作流：生成→静态语义检查(失败可重试)→dryrun→agent 语义检查(最多 check_agent_round 轮)。"""
-    working_state: Dict[str, Any] = dict(state) if isinstance(state, dict) else {}
-    code, static_detail = _generate_with_static(working_state, check_static_round)
-    working_state["check_semantics"] = static_detail
-    working_state["factor_code"] = code
+def generate_factor_with_semantic_guard(state: CodeGenView | FactorAgentState, check_static_round = 1, check_agent_round = 3) -> CodeGenView:
+    """
+    完整工作流：生成→静态语义检查(失败可重试)→dryrun→agent 语义检查(最多 check_agent_round 轮)。
 
-    # 准备运行 dryrun
-    dryrun_raw = run_factor(working_state)
-    dryrun_result = _normalize_dryrun_output(dryrun_raw)
-    working_state["dryrun_result"] = dryrun_result.model_dump()
+    参数
+    ----
+    state : FactorAgentState
+        包含因子名称、因子规格、代码模式等信息的完整状态对象。
+    check_static_round : int, optional
+        静态语义检查轮数，默认 1 轮。
+    check_agent_round : int, optional
+        agent 语义检查轮数，默认 3 轮。
 
+    返回
+    ----
+    Dict[str, Any]
+        包含因子代码、静态语义检查结果、dryrun 结果、agent 语义检查结果等信息的更新状态字典。
+    """
+    view: CodeGenView = CodeGenView.from_state(state)
     # 语义 agent 最多 check_agent_round 轮，失败则带着静态+运行信息重生成代码
     agent_attempts = 0
     agent_passed = False
     agent_detail: Dict[str, Any] = {}
     while agent_attempts < check_agent_round:
-        tmp_state = {
-            **working_state,
-            "semantic_agent_attempts": agent_attempts,
-        }
-        agent_passed, agent_detail = check_semantics_agent(tmp_state)
-        if agent_passed:
+        # （1）生成代码并做静态语义校验
+        view = _generate_with_static(view)
+        # （2）调用 agent 检查语义
+        semantic_passed, semantic_detail = check_semantics_agent(view)
+        view.set_semantic_check_result(semantic_detail)
+        # （3）重新跑 dryrun
+        dryrun_result = run_factor(view)
+        # （4）更新 view 里的 dryrun 结果
+        view.set_dryrun_result(dryrun_result.model_dump())
+
+        if semantic_passed and dryrun_result.success:
             break
-        print(f"[DBG] Agent check failed, factor_name: {working_state.get('factor_name', '')}, attempts: {agent_attempts}, detail: {agent_detail}")
+        print(f"[DBG] Agent semantic check failed, factor_name: {view.factor_name}, attempts: {agent_attempts}, \n semantic_result: {semantic_detail}, \n dryrun_result: {dryrun_result}")
         agent_attempts += 1
-        # 把 agent 反馈注入再生成一次代码，并做静态语义校验
-        working_state["check_semantics"] = agent_detail
-        # 重新跑 dryrun
-        dryrun_raw = run_factor(working_state)
-        dryrun_result = _normalize_dryrun_output(dryrun_raw)
-        working_state["dryrun_result"] = dryrun_result.model_dump()
 
-    update = {
-        "factor_code": code,
-        "check_semantics": agent_detail if agent_detail else static_detail,
-        "dryrun_result": dryrun_result.model_dump(),
-        "semantic_agent_attempts": agent_attempts,
-    }
-
-    if isinstance(state, dict):
-        state.update(update)
-
-    return update
+    return view
 
 
-def _generate_with_static(working_state: Dict[str, Any], check_static_round: int) -> Tuple[str, Dict[str, Any]]:
+def _generate_with_static(state: CodeGenView | FactorAgentState) -> CodeGenView:
     """调用代码生成 agent，并做静态语义校验，失败信息回灌到 working_state 里供下一轮提示。"""
     static_detail: Dict[str, Any] = {}
     code = ""
-    for _ in range(max(check_static_round, 1)):
-        view = CodeGenView.from_state(working_state)
-        if view.code_mode == CodeMode.L3_PY or view.code_mode == "l3_py":
-            code = generate_l3_factor_code(view)
-        elif view.code_mode == CodeMode.L3_CPP or view.code_mode == "l3_cpp":
-            code = generate_l3_cpp_factor_code(view)
-        else:
-            body = simple_factor_body_from_spec(view.user_spec)
-            code = render_factor_code(view.factor_name, view.user_spec, body)
+    view = CodeGenView.from_state(state)
+    if view.code_mode == CodeMode.L3_PY or view.code_mode == "l3_py":
+        code = generate_l3_factor_code(view)
+    elif view.code_mode == CodeMode.L3_CPP or view.code_mode == "l3_cpp":
+        code = generate_l3_cpp_factor_code(view)
+    else:
+        body = simple_factor_body_from_spec(view.user_spec)
+        code = render_factor_code(view.factor_name, view.user_spec, body)
 
-        tmp_state = {**working_state, "factor_code": code}
-        static_passed, static_detail = check_semantics_static(tmp_state)
-        working_state["check_semantics"] = static_detail
-        working_state["factor_code"] = code
-        if static_passed:
-            break
-    return code, static_detail
+    # （1）更新 view 里的 factor_code
+    view.factor_code = code
+    static_passed, static_detail = check_semantics_static(view)
+    # （2）更新 view 里的静态语义检查结果
+    view.set_semantic_check_result(static_detail)
+    # 准备运行 dryrun
+    dryrun_result = run_factor(view)
+    # （3）更新 view 里的 dryrun 结果
+    view.set_dryrun_result(dryrun_result)
+    return view
 
-
-def _normalize_dryrun_output(run_res: Dict[str, Any]) -> DryrunResult:
-    return DryrunResult(
-        success=bool(run_res.get("success")),
-        stdout=None if run_res.get("stdout") is None else str(run_res.get("stdout")),
-        stderr=None if run_res.get("stderr") is None else str(run_res.get("stderr")),
-    )
 
 
 

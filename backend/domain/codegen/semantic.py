@@ -7,7 +7,20 @@ from domain.codegen.agent_with_prompt import agent_semantic_check
 from domain.codegen.view import CodeGenView, CodeMode, SemanticCheckResult, DryrunResult
 
 
-def check_semantics_static(state) -> Tuple[bool, Dict]:
+def check_semantics_static(state:  CodeGenView | FactorAgentState) -> Tuple[bool, Dict]:
+    """
+    静态语义检查，检查因子代码是否符合语法规范。
+
+    参数
+    ----
+    state : FactorAgentState
+        包含因子代码、代码模式（L3_PY/L3_CPP/普通模式）等信息的完整状态对象。
+
+    返回
+    ----
+    Tuple[bool, Dict]
+        包含检查是否通过（bool）和详细结果（Dict）的元组。
+    """
     view = CodeGenView.from_state(state)
 
     if view.code_mode == CodeMode.L3_PY or view.code_mode == "l3_py":
@@ -37,20 +50,25 @@ def check_semantics_static(state) -> Tuple[bool, Dict]:
     return detail.passed, detail.model_dump()
 
 
-def check_semantics_agent(state) -> Tuple[bool, Dict]:
-    """调用语义 agent 检查运行结果和代码，容错降级。"""
+def check_semantics_agent(state: CodeGenView | FactorAgentState) -> Tuple[bool, Dict]:
+    """
+    调用语义 agent 检查运行结果和代码，容错降级。
+
+    参数
+    ----
+    state : CodeGenView | FactorAgentState
+        包含因子代码、代码模式（L3_PY/L3_CPP/普通模式）、dryrun 结果等信息的完整状态对象。
+
+    返回
+    ----
+    Tuple[bool, Dict]
+        包含检查是否通过（bool）和详细结果（Dict）的元组。
+    """
     view = CodeGenView.from_state(state)
-    enabled = os.getenv("ENABLE_SEMANTIC_AGENT", "false").lower() in ("1", "true", "yes")
     dr = view.dryrun_result or DryrunResult()
     if not isinstance(dr, DryrunResult):
         dr = DryrunResult(**dr)
 
-    # 如果未启用语义 agent，则基于 dryrun 结果做最小判定
-    if not enabled:
-        passed = bool(dr.success)
-        reason = [] if passed else ["dryrun failed and semantic agent disabled"]
-        res = SemanticCheckResult(passed=passed, reason=reason, last_error="; ".join(reason) if reason else None)
-        return passed, res.model_dump()
-
+    # 调用语义 agent 检查运行结果和代码
     parsed = agent_semantic_check.invoke_semantic_agent(view, dr)
     return parsed.passed, parsed.model_dump()

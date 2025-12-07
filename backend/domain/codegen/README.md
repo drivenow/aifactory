@@ -44,7 +44,7 @@
     ```
     预期输出：返回包含 `struct FactorBuyWillingByPriceParam`、`class FactorBuyWillingByPrice : public Factor<...>`，在 `on_init` 获取 `FactorSecTradeAgg`，`calculate` 中使用 `compute`/`SlidingWindow` 的 C++ 源码字符串。
 
-- **Pandas 模式（演示）**
+- **Pandas 模式（MOCK）**
   - 设置 `code_mode = CodeMode.PANDAS`，调用 `generate_factor_code_from_spec`，使用模板+简单规则生成 Pandas 因子主体。
   - 示例输入：
     ```python
