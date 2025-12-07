@@ -3,9 +3,16 @@ from __future__ import annotations
 from typing import Any, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from domain.codegen.tools import get_formatted_nonfactor_info_cpp
+from domain.codegen.framework.factor_l3_cpp_standard import (
+    PROMPT_FACTOR_L3_CPP_RULE,
+    PROMPT_FACTOR_L3_CPP_DEMO,
+    CPP_NONFACTOR_META,
+    CPP_NONFACTOR_PATH
+)
+
 from domain.codegen.view import CodeGenView
 from domain.llm import _extract_last_assistant_content, _unwrap_agent_code, create_agent
+
 
 PROMPT_FACTOR_L3_CPP = """
 # 高频量化因子转写任务（Python/自然语言描述 → C++）
@@ -90,83 +97,8 @@ PROMPT_FACTOR_L3_CPP = """
 ---
 
 ## 二、Python → C++ 转写总原则
-
-1. **因子逻辑保持一致**
-
-   * 以 Python 因子代码为主参考，如果存在自然语言描述，二者不一致时以 Python 代码为准；
-   * 所有数值计算、窗口逻辑、条件判断、边界行为（如长度不足时返回 0）必须与 Python 保持等价。
-
-2. **nonfactor 使用规范（Python 与 C++ 一致）**
-
-   * **禁止**在 C++ 因子中重复从原始 L3 数据（`get_market_data().get_prev_n_quote()` / `get_prev_n_trade()` 等）重新计算已经在 nonfactor 中聚合好的字段；
-   * **必须**按照 Python 因子中 `self.get_factor_instance("FactorXXX")` 的依赖关系，在 C++ 中使用 `get_factor<FactorXXX>()` 获取同名 nonfactor；
-   * 字段访问规则：
-
-     * Python：`self.nonfactor.some_field_list[-1]`
-     * C++：`nonfac->some_field_list.back()` 或 `nonfac->some_field_list[idx]`，其中 `idx` 按 Python 逻辑转换。
-
-3. **C++ 因子框架规范**（参考 SDK 文档与示例）
-
-   * 文件名和类名 **使用与 Python 因子一致的因子名**，如 `FactorBuyWillingByPrice`；
-   * 定义参数结构体：`struct FactorBuyWillingByPriceParam { ... };`
-
-     * 仅暴露必要参数，如窗口秒数、阈值等；
-     * 使用 `NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FactorBuyWillingByPriceParam, ...)`；
-   * 因子类定义：
-
-     * `class FactorBuyWillingByPrice : public Factor<FactorBuyWillingByPriceParam> { ... };`
-     * 使用 `FACTOR_INIT(FactorBuyWillingByPrice)` 宏；
-     * `on_init()` 中完成：
-
-       * 所有 `SlidingWindow` 成员的初始化；
-       * 调用 `get_factor<FactorSecXXX>()` 获取 nonfactor，并对空指针抛出 `std::runtime_error`；
-   * `calculate()` 中：
-
-     * 每次调用先给 `value() = 0;` 做初始化；
-     * 根据 nonfactor 向量长度判断是否有足够数据，不足时返回 0；
-     * 使用 `compute::` 系列算子完成窗口内计算；
-     * 最终将计算结果写入 `value()` 并返回 `Status::OK()`。
-
-4. **预置算子和 SlidingWindow 最佳实践**
-
-   * 对窗口内的累积、均值、方差等运算，**优先使用**:
-
-     * `compute::sum(w, n)`, `compute::mean(w, n)`, `compute::std(w, n)` 等；
-     * 对 10 档盘口（买价/卖价/数量/笔数）使用 `compute::sum` 等算子完成加权和，而不是手写逐档循环；
-   * 对需要滚动窗口的中间变量，**必须使用 `SlidingWindow` 容器**：
-
-     * 在 `on_init()` 中，用参数（比如 `param().SECONDS`）指定窗口长度；
-     * 在 `calculate()` 中按 tick 推进，`push()` 新值，再对整个窗口调用 `compute` 算子。
-
-   * 常用计算算子如下：
-      调用方式：compute::算子名()
-
-      | 算子 | 功能 |
-      |-----|------|
-      | mean | 计算平均值 |
-      | std | 标准差 |
-      | var | 方差 |
-      | median | 中位数 |
-      | quantile | 分位数 |
-      | diff | 计算相邻元素的差值 |
-      | ema | 指数移动平均 |
-      | corr | 相关性 |
-      | cov | 协方差 |
-      | max/min | 最大值、最小值 |
-      | imax/imin | 最大值、最小值的索引 |
-      | add/sub | 向量加减 |
-      | mul/div | 向量相乘、相除 |
-      | kurtosis | 峰度 |
-      | skewness | 偏度 |
-      | sum | 求和 |
-      | ewa | 指数加权平均 |
-
-
-5. **对 Python 中“时间或窗口函数”的映射**
-
-   * 如果 Python 使用上一条或前 N 条采样 1s 值（`[-1]`, `[-2]` 等），在 C++ 中保持 index 逻辑一致；
-   * 若 Python 因子里存在类似“过去 N 秒内的统计量”，而其实现已经基于 nonfactor 的 `xxx_list`，则在 C++ 中使用同一个非因子列表 + `SlidingWindow` 和 `compute` 算子表示。
-
+""" + PROMPT_FACTOR_L3_CPP_RULE+ \
+"""
 ---
 
 ## 三、具体转写步骤
@@ -261,90 +193,8 @@ PROMPT_FACTOR_L3_CPP = """
 
 请在理解以上所有规范后，再进行代码生成。你的最终回答只能包含一份完整的 C++ 因子实现源码。
 
-以下是一个C++因子的实例：
-```cpp
+"""+PROMPT_FACTOR_L3_CPP_DEMO
 
-#include "huatai/atsquant/factor/all_factor_types.h"
-#include "huatai/atsquant/factor/base_factor.h"
-#include "huatai/atsquant/factor/compute.h"
-
-#include "huatai/atsquant/factor/nonfactor/FactorSecOrderBook.h"
-#include <cstddef>
-namespace huatai::atsquant::factor {
-struct FactorBookSell15Move1QtyDeltaDy0TickQtyRatioParam {
-  int64_t SECONDS = 300;
-};
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FactorBookSell15Move1QtyDeltaDy0TickQtyRatioParam, SECONDS)
-
-class FactorBookSell15Move1QtyDeltaDy0TickQtyRatio : public Factor<FactorBookSell15Move1QtyDeltaDy0TickQtyRatioParam> {
-  std::shared_ptr<FactorSecOrderBook> nonfac;
-
-public:
-  FACTOR_INIT(FactorBookSell15Move1QtyDeltaDy0TickQtyRatio)
-  // static const int SECONDS = 300;
-
-  // 对于窗口数据，都选用SlidingWindow数据结构,在创建时就指定了窗口大小
-  SlidingWindow<double> bigger_ask_vol_qty_queue;
-  SlidingWindow<double> ask_vol_qty_queue;
-  void on_init() override {
-    bigger_ask_vol_qty_queue=SlidingWindow<double>{static_cast<size_t>(param().SECONDS)};
-    ask_vol_qty_queue= SlidingWindow<double>{static_cast<size_t>(param().SECONDS)};
-    nonfac = get_factor<FactorSecOrderBook>();
-    if (nonfac == nullptr) {
-      throw std::runtime_error("get nonfactor FactorSecOrderBook error!");
-    }
-  }
-
-  Status calculate() override {
-
-    value() = 0;
-
-    // 获取nonfactor采样1s的依赖盘口数据，取最新价字段，
-    auto size_len = nonfac->last_px_list.size();
-    if (size_len < 2) {
-      value() = 0;
-      auto last_tick = get_market_data().get_prev_n_quote(2);
-      bigger_ask_vol_qty_queue.push(0);
-      ask_vol_qty_queue.push(compute::sum(last_tick.list_item<QuoteSchema::Index::ASK_QTY>(), 10));
-      return Status::OK();
-    }
-   /////////////////（1）以下为获取nonfactor采样1s的行情数据(首选)///////////////////////
-	 // 获取nonfactor采样1s的依赖盘口数据，取十档卖方数量，
-    const auto last_ask_qty = nonfac->ask_qty_list[size_len - 2];
-    const auto current_ask_qty = nonfac->ask_qty_list.back();
-
-   //   使用框架compute算子，计算前5档委托数量的总和
-  // 因为nonfac->ask_qty_list和ask_vol_qty_queue都是SlidingWindow的数据结构，在创建时已经指定了窗口大小, 
-    auto sum_ask_v = compute::sum(nonfac->ask_qty_list, 5);
-    auto sum_ask_vol_qty = compute::sum(ask_vol_qty_queue, 5);
-
-    	
-    // 从nonfactor采样1s的依赖的逐笔聚合1s数据，取成交成交统计量
-    size_t idx = nonfac->trade_buy_volume_list.size();
-    auto trade_buy_volume_1s = nonfac->trade_buy_volume_list[idx - 1];// 获取最近1s买方成交的统计量
-    auto trade_sell_volume_1s = nonfac->trade_sell_volume_list[idx - 1];// 获取最近1s买方成交的统计量
-
-     // 使用框架算子示例：
-    auto volumes = quote.item<QuoteSchema::Index::BidVolume>();
-    auto avg_vol = compute::mean(volumes);
-
-   /////////////////（2）以下为获取原始行情数据(次选，会重新遍历逐笔，计算量大)///////////////////////
-   //获取前n个的tick数据
-    auto row_tick = get_market_data().get_prev_n_quote(1);
-    // 获取前n秒的trade数据
-    auto row_trade = get_market_data().get_prev_n_sec_trade(param().interval);
-    value() = 0;
-    // 获取盘口的买一和卖一价格
-    auto current_tick_ask_p0 = row_tick.list_item<QuoteSchema::Index::ASK_PRICE>()[0];
-    auto current_tick_bid_p0 = row_tick.list_item<QuoteSchema::Index::BID_PRICE>()[0];
-    return Status::OK();
-  }
-};
-FACTOR_REGISTER(FactorBookSell15Move1QtyDeltaDy0TickQtyRatio)
-} // namespace huatai::atsquant::factor
-```
-
-"""
 
 _L3_CPP_AGENT: Optional[Any] = None
 
@@ -378,11 +228,31 @@ def build_l3_cpp_user_message(view: CodeGenView) -> HumanMessage:
     if dryrun and (dryrun.stdout or dryrun.stderr):
         user_content += "\n[上一轮运行信息]\n"
         if dryrun.stdout:
-            user_content += f"stdout:\n{str(dryrun.stdout)[:2000]}\n"
+            user_content += f"stdout:\n{str(dryrun.stdout)[:200]}\n"
         if dryrun.stderr:
             user_content += f"stderr:\n{str(dryrun.stderr)[:2000]}\n"
 
     return HumanMessage(content=user_content)
+
+
+def get_formatted_nonfactor_info_cpp() -> str:
+    """C++ NonFactor字段与源码摘要。"""
+    lines = []
+    for name, meta in CPP_NONFACTOR_META.items():
+        lines.append(f"\n--- {name} ---")
+        lines.append(meta.desc)
+        for field, desc in meta.fields.items():
+            lines.append(f"- {field}: {desc}")
+
+    lines = lines+[info, "\n【C++ NonFactors 头文件】"]
+    for name, meta in CPP_NONFACTOR_PATH.items():
+        lines.append(f"\n--- {name} ---")
+        try:
+            with open(meta.path, "r", encoding="utf-8") as f:
+                lines.append(f.read())
+        except Exception as e:
+            lines.append(f"Error reading source: {e}")
+    return "\n".join(lines)
 
 
 def invoke_l3_cpp_agent(view: CodeGenView) -> str:
@@ -409,3 +279,7 @@ def invoke_l3_cpp_agent(view: CodeGenView) -> str:
         return _unwrap_agent_code(txt, lang="cpp").strip()
     except Exception as e:
         return f"// ERROR: Agent invoke failed: {e}\n"
+
+
+if __name__ == "__main__":
+    print(PROMPT_FACTOR_L3_CPP)

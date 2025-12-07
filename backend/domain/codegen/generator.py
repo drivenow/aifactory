@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Dict, Any, Tuple
-from domain.codegen.tools.mock_factor_tool import (
+from domain.codegen.framework.factor_mock_tool import (
     render_factor_code,
     simple_factor_body_from_spec,
 )
@@ -58,9 +58,9 @@ def generate_factor_with_semantic_guard(state: CodeGenView | FactorAgentState, c
         # （3）重新跑 dryrun
         dryrun_result = run_factor(view)
         # （4）更新 view 里的 dryrun 结果
-        view.set_dryrun_result(dryrun_result.model_dump())
+        view.set_dryrun_result(dryrun_result)
 
-        if semantic_passed and dryrun_result.success:
+        if view.check_semantics.passed and view.dryrun_result.success:
             break
         print(f"[DBG] Agent semantic check failed, factor_name: {view.factor_name}, attempts: {agent_attempts}, \n semantic_result: {semantic_detail}, \n dryrun_result: {dryrun_result}")
         agent_attempts += 1

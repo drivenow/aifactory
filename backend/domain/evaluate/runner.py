@@ -4,8 +4,8 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from domain.evaluate.view import EvalView, FactorAgentState
-from domain.evaluate.tools.l3_factor_evals import l3_factor_eval_tool
-from domain.evaluate.tools import mock_evals
+from domain.evaluate.framework.l3_factor_evals import l3_factor_eval_tool
+from domain.evaluate.framework import mock_factor_evals
 
 
 def compute_eval_metrics(state:  EvalView | FactorAgentState) -> Dict[str, Any]:

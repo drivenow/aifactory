@@ -7,7 +7,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[5]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from domain.codegen.tools.l3_factor_tool import l3_mock_run
+from domain.framework.factor_l3_py_tool import l3_mock_run
 
 # Sample L3 Factor Code (Mocking a simple factor)
 SAMPLE_L3_CODE = """

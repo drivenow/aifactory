@@ -170,7 +170,7 @@ curl -s -X GET http://localhost:8001/agent/health
     *   `runner.py`: 代码生成主入口，支持 Mock 和真实 L3 模式 (`CodeMode`)。
     *   `generator.py`: 基于 Prompt 和 LLM 生成因子代码。
     *   `validator.py`: 语义检查，确保代码符合预期的输入输出规范。
-    *   `tools/l3_factor_tool.py`: 提供 L3 系统的语法检查与模拟运行工具。
+    *   `tools/factor_l3_py_tool.py`: 提供 L3 系统的语法检查与模拟运行工具。
 *   `evaluate/` (因子评价):
     *   `runner.py`: 评价执行主入口。
     *   `tools/l3_factor_evals.py`: 调用 L3 评价系统计算 IC、换手率等指标。

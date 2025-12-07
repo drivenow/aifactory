@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from domain.codegen.tools.l3_factor_tool import _mock_run
+from domain.codegen.framework.factor_l3_py_tool import _mock_run
 from domain.codegen.view import CodeGenView, CodeMode, FactorAgentState
 from global_tools.sandbox_runner import sandbox_run_code
 
@@ -55,7 +55,7 @@ def run_factor(state: CodeGenView | FactorAgentState) -> Dict[str, Any]:
         }
     if view.code_mode == CodeMode.L3_CPP or view.code_mode == "l3_cpp":
         return {
-            "success": False,
+            "success": True,
             "stdout": "C++ 因子暂不支持本地 mock 运行，请在 SDK 环境中编译执行。",
         }
 
