@@ -244,7 +244,7 @@ def get_formatted_nonfactor_info_cpp() -> str:
         for field, desc in meta.fields.items():
             lines.append(f"- {field}: {desc}")
 
-    lines = lines+[info, "\n【C++ NonFactors 头文件】"]
+    lines = lines+["\n【C++ NonFactors 头文件】"]
     for name, meta in CPP_NONFACTOR_PATH.items():
         lines.append(f"\n--- {name} ---")
         try:

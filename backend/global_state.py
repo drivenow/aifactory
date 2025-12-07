@@ -128,9 +128,10 @@ class FactorAgentState(
 
     """CodeGenState 代码生成阶段产物"""
 
-    factor_code: Annotated[str, keep_last]          # 生成的因子代码（模板化）
+    factor_code: Annotated[str, keep_last]    # 生成的因子代码（模板化）
+    factor_path: str = ""                     # 因子代码文件路径（用于后续运行）
     dryrun_result: Optional[Dict[str, Any]]   # 试运行结果：{success, stdout, stderr, traceback}
-    check_semantics: Optional[Dict[str, Any]]  # 语义一致性：{pass, diffs, reason}
+    check_semantics: Optional[Dict[str, Any]] # 语义一致性：{pass, diffs, reason}
 
     """HumanReviewState 人审相关状态（HITL）"""
 

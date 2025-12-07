@@ -6,8 +6,8 @@ import sys
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
-from domain.codegen.generator import generate_factor_code_from_spec
-from domain.codegen.view import CodeMode
+from domain.codegen.generator import generate_factor_with_semantic_guard
+from domain.codegen.view import CodeMode, CodeGenView
 
 
 def load_specs(json_path: Path) -> List[Dict[str, Any]]:
@@ -37,22 +37,27 @@ def convert_spec(spec: Dict[str, Any], out_dir: Path, overwrite: bool) -> Option
     user_spec = ensure_str(spec.get("user_spec") or spec.get("desc") or spec.get("description"), "")
     factor_code = ensure_str(spec.get("factor_code") or spec.get("code"), "")
 
-    state = {
-        "factor_name": factor_name,
-        "user_spec": user_spec,
-        "factor_code": factor_code,
-        "code_mode": CodeMode.L3_PY,
-    }
-    py_code = generate_factor_code_from_spec(state)
-
     out_path = out_dir / f"{factor_name}.py"
     if out_path.exists() and not overwrite:
         print(f"[skip] {out_path} already exists (use --overwrite to replace)")
         return None
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(py_code, encoding="utf-8")
-    return out_path
+    state = {
+        "factor_name": factor_name,
+        "user_spec": user_spec,
+        "factor_code": factor_code,
+        "code_mode": CodeMode.L3_PY,
+        "factor_path": str(out_path),  # Pass target path
+    }
+    
+    # Use generator with semantic guard and automatic saving
+    view = generate_factor_with_semantic_guard(state, check_agent_round=3)
+    
+    if view.check_semantics.passed and view.dryrun_result.success:
+         return Path(view.factor_path) if view.factor_path else out_path
+    else:
+        print(f"[warn] Generation for {factor_name} failed checks: {view.check_semantics.reason}")
+        return None
 
 
 def main(argv: Optional[List[str]] = None) -> int:

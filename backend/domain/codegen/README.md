@@ -1,89 +1,109 @@
 # codegen 模块导航
 
-- `view.py`：把 `FactorAgentState` 规整成 `CodeGenView`，统一字段、默认值、容错（含 `code_mode`）。
-- `generator.py`：按 `code_mode` 生成代码；Pandas 用模板渲染，L3 Python/C++ 调用各自 agent。
-- `agent.py`：L3 因子代码生成 agent，Python/C++ 共用；注入对应 nonfactor 提示。
-- `tools/`：L3 专用工具（语法检查、mock 运行、nonfactor 元数据），含 py/cpp nonfactor 描述与源码聚合。
-- `runner.py`：运行或 mock 运行因子，保证输出字段一致（C++ 模式仅提示暂不支持本地运行）。
-- `validator.py`：语义检查/结果标准化，输出布尔 + detail。
-- `scripts/`：批量脚本，如 `batch_py_to_cpp.py`（遍历因子代码转 C++）、`batch_json_to_py.py`（JSON 描述批量生 Python 因子）。
+本模块 (`backend/domain/codegen`) 提供了一套**自动化生成量化因子代码**的解决方案，支持从自然语言描述或已有代码转换为标准的 Python / C++ L3 因子实现。
 
-调用顺序建议：collect_spec → generator.generate_factor_code_from_spec → runner.run_factor → validator.check_semantics_static（失败态附带 reason/last_error）。替换某一环时，只要保持输入输出契约即可。
+## 1. 核心语义与设计意图
 
-## 用法速览
+本模块主要服务于以下场景：
+- **AI 辅助编程**：将自然语言需求转化为可执行的因子代码。
+- **跨语言转写**：将 Python 因子原型转写为高性能 C++ 生产代码。
+- **质量守护**：通过静态分析、Mock 运行和 Agent 自查，确保生成代码的语法正确性和逻辑合理性。
 
-- **Python L3 因子生成**
-  - 设置 `CodeGenView.code_mode = CodeMode.L3_PY`，提供 `factor_name`、`user_spec`（可选 `factor_code` 作为修正上下文）。
-  - 调用 `generator.generate_factor_code_from_spec(state)` 返回 Python L3 因子源码；内部注入 Python nonfactor 字段/源码提示，使用 LangChain Agent 生成。
-  - 可用 `runner.run_factor(state)` 在 stub L3 环境 mock 运行；`validator.check_semantics_static(state)` 做语义校验。
-  - 示例输入：
-    ```python
-    state = {
-        "factor_name": "FactorBuyWillingByPrice",
-        "user_spec": "用1秒成交聚合计算买卖意愿",
-        "code_mode": CodeMode.L3_PY,
-    }
-    code = generate_factor_code_from_spec(state)
-    ```
-    预期输出：返回一段继承 `FactorBase`、在 `calculate` 中读取 `FactorSecTradeAgg` 字段并 `addFactorValue` 的 Python 代码字符串。
+## 2. 目录结构与关键文件
 
-- **C++ L3 因子生成**
-  - 设置 `CodeGenView.code_mode = CodeMode.L3_CPP`，同样传入 `factor_name`、`user_spec`（或 `factor_code` 追加上下文）。
-  - 调用 `generator.generate_factor_code_from_spec(state)` 返回 C++ 因子源码；提示词会注入 C++ nonfactor 字段/头文件摘要。
-  - 本地 runner 暂不支持 C++ 编译运行，需在 SDK 环境落地测试。
-  - 示例输入：
-    ```python
-    factor_code = "FactorBuyWillingByPrice的python代码"
-    state = {
-        "factor_name": "FactorBuyWillingByPrice",
-        "user_spec": "用1秒成交聚合计算买卖意愿",
-        "code_mode": CodeMode.L3_CPP,
-        "factor_code": factor_code,
-    }
-    code = generate_factor_code_from_spec(state)
-    ```
-    预期输出：返回包含 `struct FactorBuyWillingByPriceParam`、`class FactorBuyWillingByPrice : public Factor<...>`，在 `on_init` 获取 `FactorSecTradeAgg`，`calculate` 中使用 `compute`/`SlidingWindow` 的 C++ 源码字符串。
+### 2.1 核心流程
+- **`generator.py`** (Entry Point):
+  - 核心入口 `generate_factor_code_from_spec`。
+  - 编排 "生成 -> 静态检查 -> Dryrun -> Agent 语义检查" 的完整闭环。
+- **`view.py`** (Data Model):
+  - 定义 `CodeGenView` 和 `FactorAgentState`，统一输入输出契约。
+  - 管理 `code_mode` (L3_PY / L3_CPP / PANDAS) 和各阶段的检查结果。
+- **`runner.py`** (Execution):
+  - `run_factor`: 执行因子的 Mock 运行（Python）或返回环境提示（C++）。
+  - 负责捕获 stdout/stderr 并截断过长输出，防止上下文溢出。
+- **`semantic.py`** (Validation):
+  - `check_semantics_static`: 快速静态检查（如是否继承 `FactorBase`、是否实现 `calculate`）。
+  - `check_semantics_agent`: 调用 LLM 进行更深层的逻辑和异常分析。
 
-- **Pandas 模式（MOCK）**
-  - 设置 `code_mode = CodeMode.PANDAS`，调用 `generate_factor_code_from_spec`，使用模板+简单规则生成 Pandas 因子主体。
-  - 示例输入：
-    ```python
-    state = {
-        "factor_name": "DemoFactor",
-        "user_spec": "5日均线",
-        "code_mode": CodeMode.PANDAS,
-    }
-    code = generate_factor_code_from_spec(state)
-    ```
-    预期输出：返回一个带 `compute_factor` 的 Pandas 模板字符串，包含 rolling mean 逻辑。
+### 2.2 Agent 与 Prompt
+- **`agent_with_prompt/`**:
+  - `agent_factor_l3_py.py`: Python L3 因子生成 Agent。
+  - `agent_factor_l3_cpp.py`: C++ L3 因子生成 Agent。
+  - `agent_semantic_check.py`: 语义校验 Agent。
+  - **设计原则**：Prompt 作为“一等公民”管理，核心规则与 Few-Shot 样例分离。
 
-- **批量 Python→C++ 转换脚本**
-  - 位置：`backend/domain/codegen/scripts/batch_py_to_cpp.py`
-  - 用途：遍历指定目录下的 `.py` 因子文件，推断类名（`class Xxx(FactorBase)`），将代码作为上下文交给 C++ agent 生成对应 C++ 源码，并写入输出目录。
-  - 使用示例：
-    ```bash
-    python -m backend.graph.domain.codegen.scripts.batch_py_to_cpp \
-      --src /path/to/py_factors \
-      --out /path/to/output_cpp \
-      --overwrite  # 可选，存在同名文件时覆盖
-    ```
-  - 输出：按因子名生成 `FactorName.cpp` 文件；若 agent 未配置会返回占位 C++ 代码，需在 SDK 环境验证。
+### 2.3 基础设施 (Framework)
+- **`framework/`**:
+  - `factor_l3_py_standard.py` / `factor_l3_cpp_standard.py`: 定义标准 Prompt 模板、规则和 Demo。
+  - `py_nonfactor/` & `cpp_nonfactor/`: 存放 NonFactor（基础数据聚合算子）的元数据和源码，供 Agent 参考以生成正确的依赖调用。
+  - `factor_mock_tool.py`: 提供本地 Mock 运行环境和简单的 Pandas 模板渲染。
 
-- **批量 JSON → Python 因子生成脚本**
-  - 位置：`backend/domain/codegen/scripts/batch_json_to_py.py`
-  - 用途：读取 JSON 中的因子描述，批量生成 Python L3 因子代码。
-  - JSON 格式示例（数组或包含 `items` 数组）：
-    ```json
-    [
-      {"factor_name": "FactorAlpha1", "user_spec": "买卖金额差/和归一化"},
-      {"name": "FactorAlpha2", "desc": "5秒内涨幅均值", "factor_code": ""}  // 可选附带已有代码
-    ]
-    ```
-  - 使用示例：
-    ```bash
-    python -m backend.graph.domain.codegen.scripts.batch_json_to_py \
-      --json /path/to/factors.json \
-      --out /path/to/output_py \
-      --overwrite  # 可选，存在同名文件时覆盖
-    ```
-  - 输出：按因子名生成 `FactorName.py` 文件（继承 `FactorBase` 的 L3 因子），可配合 `runner.run_factor` 做 stub mock 运行。
+### 2.4 批处理工具 (Scripts)
+- **`scripts/`**:
+  - `batch_py_to_cpp.py`: 批量将 Python 因子转写为 C++。
+  - `batch_json_to_py.py`: 批量从 JSON 描述生成 Python 因子。
+
+---
+
+## 3. 使用指南
+
+### 3.1 Python L3 因子生成
+适用于快速原型开发和验证。
+
+```python
+from domain.codegen.generator import generate_factor_code_from_spec
+from domain.codegen.view import CodeMode
+
+state = {
+    "factor_name": "FactorBuyWillingByPrice",
+    "user_spec": "用1秒成交聚合计算买卖意愿",
+    "code_mode": CodeMode.L3_PY,
+}
+
+# 生成代码（包含自动修正流程）
+code = generate_factor_code_from_spec(state)
+print(code)
+```
+**预期输出**：继承 `FactorBase` 的 Python 类，自动注入 `FactorSecTradeAgg` 等 NonFactor 依赖。
+
+### 3.2 C++ L3 因子生成
+适用于生产环境部署。
+
+```python
+state = {
+    "factor_name": "FactorBuyWillingByPrice",
+    "user_spec": "用1秒成交聚合计算买卖意愿",
+    # 可选：提供 Python 代码作为参考上下文
+    "factor_code": python_code_str,
+    "code_mode": CodeMode.L3_CPP,
+}
+
+code = generate_factor_code_from_spec(state)
+```
+**预期输出**：包含 `struct Param` 定义、继承 `Factor<Param>` 的 C++ 类，使用 `SlidingWindow` 和 `compute::` 算子。
+
+### 3.3 批量转写脚本
+
+**Python 转 C++**:
+```bash
+python -m backend.domain.codegen.scripts.batch_py_to_cpp \
+  --src /path/to/py_factors \
+  --out /path/to/output_cpp \
+  --overwrite
+```
+
+**JSON 转 Python**:
+```bash
+python -m backend.domain.codegen.scripts.batch_json_to_py \
+  --json /path/to/factors.json \
+  --out /path/to/output_py
+```
+
+## 4. 扩展与维护
+
+- **新增 NonFactor**:
+  - 在 `framework/py_nonfactor` 或 `framework/cpp_nonfactor` 添加对应的元数据/源码文件。
+  - 更新 `standard.py` 中的引用，使 Agent 能感知新能力。
+- **调整 Prompt**:
+  - 修改 `agent_with_prompt/` 下对应 Agent 的 System Prompt。
+  - 遵循“开闭原则”：核心规则保持稳定，针对新场景通过 Few-Shot 或特定指令扩展。

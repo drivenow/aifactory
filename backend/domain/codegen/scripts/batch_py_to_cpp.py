@@ -6,8 +6,8 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from domain.codegen.generator import generate_factor_code_from_spec
-from domain.codegen.view import CodeMode
+from domain.codegen.generator import generate_factor_with_semantic_guard
+from domain.codegen.view import CodeMode, CodeGenView
 
 
 def infer_factor_name(code_text: str, fallback: str) -> str:
@@ -31,22 +31,30 @@ def convert_file(py_path: Path, out_dir: Path, overwrite: bool) -> Optional[Path
     """Convert a single Python factor file to C++ and write to out_dir."""
     code_text = py_path.read_text(encoding="utf-8")
     factor_name = infer_factor_name(code_text, py_path.stem)
-    state = {
-        "factor_name": factor_name,
-        "user_spec": "",
-        "factor_code": code_text,
-        "code_mode": CodeMode.L3_CPP,
-    }
-    cpp_code = generate_factor_code_from_spec(state)
-
+    
     out_path = out_dir / f"{factor_name}.cpp"
     if out_path.exists() and not overwrite:
         print(f"[skip] {out_path} already exists (use --overwrite to replace)")
         return None
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(cpp_code, encoding="utf-8")
-    return out_path
+    state = {
+        "factor_name": factor_name,
+        "user_spec": "",
+        "factor_code": code_text,
+        "code_mode": CodeMode.L3_CPP,
+        "factor_path": str(out_path),  # Pass target path to view
+    }
+    
+    # Use generator with semantic guard and automatic saving
+    view = generate_factor_with_semantic_guard(state, check_agent_round=3)
+    
+    if view.check_semantics.passed and view.dryrun_result.success:
+        return Path(view.factor_path) if view.factor_path else out_path
+    else:
+        # If generation failed semantic checks, we might still want to inspect the result or log error
+        print(f"[warn] Generation for {factor_name} failed checks: {view.check_semantics.reason}")
+        return None
+
 
 
 def main(argv: Optional[List[str]] = None) -> int:

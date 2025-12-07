@@ -38,11 +38,19 @@ for codemode in [CodeMode.PANDAS, CodeMode.L3_CPP, CodeMode.L3_PY]:
         )
         result = generate_factor_with_semantic_guard(view)
         print(result)
-    else:
+    elif codemode == CodeMode.L3_PY:
         view = CodeGenView(
             factor_name="TestFactor",
             user_spec="计算股票的简单移动平均线",
             code_mode=CodeMode.L3_PY,
+        )
+        result = generate_factor_with_semantic_guard(view)
+        print(result)
+    else:
+        view = CodeGenView(
+            factor_name="TestFactor",
+            user_spec="计算股票的简单移动平均线",
+            code_mode=codemode,
         )
         result = generate_factor_with_semantic_guard(view)
         print(result)

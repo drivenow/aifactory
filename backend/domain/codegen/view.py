@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 from enum import Enum
 from typing import Any, List, Optional
 from pydantic import BaseModel, Field
+from pathlib import Path
 try:
     from global_state import FactorAgentState, ViewBase
 except (ImportError, ValueError):  # pragma: no cover
@@ -58,40 +60,110 @@ class CodeGenView(ViewBase):
     user_spec: str = ""
     factor_name: str = "factor"
     factor_code: str = ""
+    factor_path: str = ""
     code_mode: CodeMode = CodeMode.PANDAS
     dryrun_result: DryrunResult = Field(default_factory=DryrunResult)
     check_semantics: SemanticCheckResult = Field(default_factory=SemanticCheckResult)
 
     def set_dryrun_result(self, dryrun_result: DryrunResult | dict):
-        if not isinstance(dryrun_result, DryrunResult):
-            assert isinstance(dryrun_result, dict), "dryrun_result must be a DryrunResult or a dict"
-            assert "success" in dryrun_result, "dryrun_result must contain 'success' key"
-            assert "stdout" in dryrun_result or "stderr" in dryrun_result, "dryrun_result must contain 'stdout' or 'stderr' key"
-            self.dryrun_result = self._parse_dryrun(dryrun_result)
-        else:
-            self.dryrun_result = dryrun_result
+        self.dryrun_result = self._parse_dryrun(dryrun_result)
     
     def set_semantic_check_result(self, semantic_check_result: SemanticCheckResult | dict):
-        if not isinstance(semantic_check_result, SemanticCheckResult):
-            assert isinstance(semantic_check_result, dict), "semantic_check_result must be a SemanticCheckResult or a dict"
-            assert "passed" in semantic_check_result, "semantic_check_result must contain 'passed' key" 
-            assert "reason" in semantic_check_result, "semantic_check_result must contain 'reason' key"
-            self.check_semantics = self._parse_semantic(semantic_check_result)
-        else:
-            self.check_semantics = semantic_check_result
+        self.check_semantics = self._parse_semantic(semantic_check_result)
 
-    def _parse_dryrun(self, d):
+    def __str__(self):
+        """
+        返回代码生成视图的字符串表示。
+        
+        如果语义检查通过且代码执行成功，返回成功信息，包括用户需求描述、生成的代码。
+        否则，返回失败信息，包括用户需求描述、生成的代码、语义检查结果、代码执行结果。
+        """
+        lines = []
+        if self.check_semantics.passed and self.dryrun_result.success:
+            lines.append(f"[SUCCESS] 因子 {self.factor_name} 语义检查通过！")
+            lines.append(f"{'-'*30} [User Spec] {'-'*30}")
+            lines.append(self.user_spec.strip())
+            lines.append(f"\n{'-'*30} [Generated Code] {'-'*30}")
+            lines.append(self.factor_code)
+        else:
+            lines.append(f"[FAIL] 因子 {self.factor_name} 检查未通过")
+            
+            lines.append(f"\n{'-'*30} [Dryrun Result] {'-'*30}")
+            lines.append(self.dryrun_result.model_dump_json(indent=2))
+            
+            lines.append(f"\n{'-'*30} [Semantic Check] {'-'*30}")
+            lines.append(self.check_semantics.model_dump_json(indent=2))
+            
+            lines.append(f"\n{'-'*30} [Current Code] {'-'*30}")
+            lines.append(self.factor_code)
+        
+        return "\n".join(lines)
+
+    def save_code_to_file(self, base_dir: str = None) -> str:
+        """
+        Save the factor code to a file under the specified base directory.
+        
+        The file will be placed in a subdirectory determined by the code_mode,
+        and the filename will be the factor_name with the appropriate extension.
+        
+        Parameters
+        ----------
+        base_dir : str, optional
+            Base directory for saving files. Defaults to the directory of this file
+            plus 'generated_factors'.
+        
+        Returns
+        -------
+        str
+            The absolute path to the saved file.
+        """
+        if base_dir is None:
+            base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "generated_factors")
+        
+        # Determine subdirectory and file extension based on code_mode
+        if self.code_mode in (CodeMode.L3_CPP, "l3_cpp"):
+            sub_dir = "l3_cpp"
+            suffix = ".cpp"
+        elif self.code_mode in (CodeMode.L3_PY, "l3_py"):
+            sub_dir = "l3_py"
+            suffix = ".py"
+        else:
+            sub_dir = "pandas"
+            suffix = ".py"
+        
+        # Construct full directory path and ensure it exists
+        target_dir = Path(base_dir) / sub_dir
+        target_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Construct file path
+        file_path = target_dir / f"{self.factor_name}{suffix}"
+        file_path.write_text(self.factor_code, encoding="utf-8")
+        
+        # Update self.factor_path for consistency
+        self.factor_path = str(file_path)
+        return str(file_path)
+
+
+    @classmethod
+    def _parse_dryrun(cls, d):
         if not d:
             return DryrunResult()
         if isinstance(d, DryrunResult):
             return d
+        assert isinstance(dryrun_result, dict), "dryrun_result must be a DryrunResult or a dict"
+        assert "success" in dryrun_result, "dryrun_result must contain 'success' key"
+        assert "stdout" in dryrun_result or "stderr" in dryrun_result, "dryrun_result must contain 'stdout' or 'stderr' key"
         return DryrunResult(**d)
 
-    def _parse_semantic(self, d):
+    @classmethod
+    def _parse_semantic(cls, d):
         if not d:
             return SemanticCheckResult()
         if isinstance(d, SemanticCheckResult):
             return d
+        assert isinstance(semantic_check_result, dict), "semantic_check_result must be a SemanticCheckResult or a dict"
+        assert "passed" in semantic_check_result, "semantic_check_result must contain 'passed' key" 
+        assert "reason" in semantic_check_result, "semantic_check_result must contain 'reason' key"
         return SemanticCheckResult(**d)
 
     @classmethod
@@ -105,6 +177,7 @@ class CodeGenView(ViewBase):
             user_spec=state.get("user_spec") or "",
             factor_name=state.get("factor_name") or "factor",
             factor_code=state.get("factor_code") or "",
+            factor_path=state.get("factor_path") or "",
             dryrun_result=cls._parse_dryrun(state.get("dryrun_result")),
             check_semantics=cls._parse_semantic(state.get("check_semantics")),
             code_mode=state.get("code_mode") or CodeMode.PANDAS,
@@ -119,4 +192,5 @@ if __name__ == "__main__":
     )
     view = CodeGenView.from_state(state)
     view.factor_code = "1111"
-    print(view.model_dump())
+    print(view)
+

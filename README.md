@@ -163,34 +163,76 @@ curl -s -X GET http://localhost:8001/agent/health
 
 ## 主要文件与代码参考
 
-### Domain (业务领域层)
+### 1. 目录结构概览
+
+```text
+/mnt/x/RPA-github/langgraph_source/aifactory/
+├── backend/                  # 后端服务 (FastAPI + LangGraph)
+│   ├── app.py                # 后端应用入口，集成 FastAPI 与 LangGraph 路由
+│   ├── domain/               # 业务领域层 (核心业务逻辑)
+│   │   ├── codegen/          # 因子代码生成模块 (Python/C++)
+│   │   │   ├── generator.py  # 代码生成核心逻辑，编排生成流程
+│   │   │   ├── runner.py     # 代码执行器，支持 Mock 和沙盒运行
+│   │   │   ├── semantic.py   # 语义检查逻辑 (静态 + Agent)
+│   │   │   ├── view.py       # 统一的数据模型视图 (CodeGenView)
+│   │   │   ├── agent_with_prompt/ # 包含 Prompt 的 Agent 定义
+│   │   │   ├── framework/    # 基础框架支持 (Prompt 模板、NonFactor 定义)
+│   │   │   └── scripts/      # 批量处理脚本 (如 py 转 cpp)
+│   │   └── evaluate/         # 因子评价模块
+│   │       ├── runner.py     # 评价执行入口
+│   │       └── tools/        # 评价工具集
+│   ├── global_tools/         # 全局通用工具
+│   │   └── sandbox_runner.py # 代码沙盒运行器
+│   ├── graph/                # LangGraph 编排层
+│   │   ├── graph.py          # 状态图定义 (节点与边)
+│   │   ├── nodes.py          # 图节点具体实现
+│   │   └── state.py          # 全局状态定义 (FactorAgentState)
+│   └── generated_factors/    # 自动生成的因子代码输出目录
+│
+├── frontend/                 # 前端应用 (Next.js + CopilotKit)
+│   ├── app/
+│   │   ├── api/copilotkit/   # CopilotKit Runtime 适配器路由
+│   │   └── factor-copilot/   # 主应用页面
+│   ├── components/           # UI 组件 (TracePane, CodeReviewPanel 等)
+│   └── lib/                  # 前端工具库
+└── README.md                 # 项目文档
+```
+
+### 2. 关键模块详解
+
+#### Domain (业务领域层)
 **目录**: `backend/domain/`
-**功能**: 包含脱离 LangGraph 也能独立运行的核心业务逻辑，主要负责因子生成与评价。它封装了对底层因子框架 (FactorLib) 和评价框架的调用。
-*   `codegen/` (因子代码生成):
-    *   `runner.py`: 代码生成主入口，支持 Mock 和真实 L3 模式 (`CodeMode`)。
-    *   `generator.py`: 基于 Prompt 和 LLM 生成因子代码。
-    *   `validator.py`: 语义检查，确保代码符合预期的输入输出规范。
-    *   `tools/factor_l3_py_tool.py`: 提供 L3 系统的语法检查与模拟运行工具。
-*   `evaluate/` (因子评价):
-    *   `runner.py`: 评价执行主入口。
-    *   `tools/l3_factor_evals.py`: 调用 L3 评价系统计算 IC、换手率等指标。
+**功能**: 包含脱离 LangGraph 也能独立运行的核心业务逻辑。
 
-### Graph (编排层)
+*   **`codegen/` (因子代码生成)**
+    *   **核心功能**: 将自然语言/Python原型转换为高质量的 Python/C++ L3 因子代码。
+    *   **关键组件**:
+        *   `generator.py`: 编排 "生成 -> 静态检查 -> Dryrun -> Agent 语义校验" 的全流程闭环。
+        *   `runner.py`: 支持本地 Mock 运行和沙盒执行，保障代码安全性。
+        *   `framework/`: 内置 NonFactor（基础算子）元数据和标准 Prompt 模板。
+    *   **更多详情**: 请参考 [backend/domain/codegen/README.md](backend/domain/codegen/README.md)
+
+*   **`evaluate/` (因子评价)**
+    *   **核心功能**: 负责因子的回测与性能指标计算（IC、换手率等）。
+
+#### Graph (编排层)
 **目录**: `backend/graph/`
-**功能**: 基于 LangGraph 定义业务流程的状态机与节点流转逻辑。
-*   `graph.py`: 定义 StateGraph 结构，配置节点 (`add_node`) 和边 (`add_edge`/`add_conditional_edges`)。
-*   `nodes.py`: 实现具体的图节点函数 (如 `generate_factor_code`, `human_review_gate`)，负责调度 Domain 层的功能并更新 State。
-*   `state.py` / `global_state.py`: 定义 `FactorAgentState` 数据结构，作为全图共享的上下文。
+**功能**: 基于 LangGraph 定义业务流程的状态机。
+*   `graph.py`: 组装 StateGraph，定义了从 `collect_spec` 到 `finish` 的完整流转路径，包含人审门 (`human_review_gate`) 和重试逻辑。
+*   `nodes.py`: 实现了图中的每个节点，连接 Domain 层能力与 Graph 状态。
 
-### Tools (工具层)
-**目录**: `backend/global_tools/` (或分散在各 domain 的 `tools/` 下)
-**功能**: 提供通用的基础设施工具。
-*   `sandbox_runner.py`: 负责在隔离环境中执行生成的 Python 代码，捕获 stdout/stderr 和异常，确保安全运行。
+#### Tools (工具层)
+**目录**: `backend/global_tools/`
+**功能**: 提供通用的基础设施支持。
+*   `sandbox_runner.py`: 在独立进程中安全执行不可信代码，防止污染主进程。
 
-### 其他重要文件
-*   **后端入口**: `backend/app.py` - 集成 FastAPI 与 LangGraph，暴露 HTTP 接口。
-*   **前端路由**: `frontend/app/api/copilotkit/route.ts` - CopilotKit Runtime 适配器。
-*   **前端页面**: `frontend/app/factor-copilot/page.tsx` - 主交互界面。
+### 3. 重要入口文件
+*   **后端启动**: `backend/app.py`
+    *   功能: 初始化 FastAPI App，注册 `/agent` 路由，提供 SSE 流式响应。
+*   **代码生成入口**: `backend/domain/codegen/generator.py`
+    *   功能: `generate_factor_code_from_spec` 是生成逻辑的对外暴露接口，内部封装了复杂的质量守护流程。
+*   **前端适配器**: `frontend/app/api/copilotkit/route.ts`
+    *   功能: 将 CopilotKit 的请求转发给后端 LangGraph Agent，处理流式响应。
 
 ## 运行小结
 

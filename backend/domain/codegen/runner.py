@@ -47,7 +47,7 @@ def run_factor(state: CodeGenView | FactorAgentState) -> Dict[str, Any]:
                 val_preview = val_preview[:1000] + "... (truncated)"
             return {
                 "success": True,
-                "stdout": f"[L3 Mock Result]\n{val_preview}",
+                "stdout": "",
             }
         return {
             "success": False,
@@ -70,7 +70,7 @@ def run_factor(state: CodeGenView | FactorAgentState) -> Dict[str, Any]:
             result_preview = result_preview[:200] + "... (truncated)"
         return {
             "success": True,
-            "stdout": result_preview,
+            "stdout": "",
             "stderr": None,
         }
     return {

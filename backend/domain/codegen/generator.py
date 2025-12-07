@@ -20,13 +20,13 @@ def generate_l3_cpp_factor_code(view: CodeGenView) -> str:
     return agent_factor_l3_cpp.invoke_l3_cpp_agent(view)
 
 
-def generate_factor_code_from_spec(state: CodeGenView | FactorAgentState, check_static_round = 3, check_agent_round = 3) -> str:
+def generate_factor_code_from_spec(state: CodeGenView | FactorAgentState, check_agent_round = 3) -> str:
     """生成因子代码（兼容旧接口），内部执行完整语义守护流程并返回代码字符串。"""
-    res = generate_factor_with_semantic_guard(state, check_static_round, check_agent_round)
+    res = generate_factor_with_semantic_guard(state, check_agent_round)
     return res.factor_code
 
 
-def generate_factor_with_semantic_guard(state: CodeGenView | FactorAgentState, check_static_round = 1, check_agent_round = 3) -> CodeGenView:
+def generate_factor_with_semantic_guard(state: CodeGenView | FactorAgentState, check_agent_round = 3) -> CodeGenView:
     """
     完整工作流：生成→静态语义检查(失败可重试)→dryrun→agent 语义检查(最多 check_agent_round 轮)。
 
@@ -34,8 +34,6 @@ def generate_factor_with_semantic_guard(state: CodeGenView | FactorAgentState, c
     ----
     state : FactorAgentState
         包含因子名称、因子规格、代码模式等信息的完整状态对象。
-    check_static_round : int, optional
-        静态语义检查轮数，默认 1 轮。
     check_agent_round : int, optional
         agent 语义检查轮数，默认 3 轮。
 
@@ -60,9 +58,21 @@ def generate_factor_with_semantic_guard(state: CodeGenView | FactorAgentState, c
         # （4）更新 view 里的 dryrun 结果
         view.set_dryrun_result(dryrun_result)
 
+        # 打印美观的分隔符
+        separator = "=" * 80
+        print(f"\n{separator}")
+        print(view)
+        print(separator + "\n")
+        
         if view.check_semantics.passed and view.dryrun_result.success:
+             # 成功后，将代码持久化到文件（如果指定了 factor_path 或默认路径）
+            try:
+                saved_path = view.save_code_to_file()
+                print(f"[INFO] Factor code saved to: {saved_path}")
+            except Exception as e:
+                print(f"[WARN] Failed to save factor code: {e}")
             break
-        print(f"[DBG] Agent semantic check failed, factor_name: {view.factor_name}, attempts: {agent_attempts}, \n semantic_result: {semantic_detail}, \n dryrun_result: {dryrun_result}")
+            
         agent_attempts += 1
 
     return view
