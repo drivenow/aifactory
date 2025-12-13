@@ -44,6 +44,24 @@ def check_semantics_static(state:  CodeGenView | FactorAgentState) -> Tuple[bool
         )
         return passed, result.model_dump()
 
+    if view.code_mode == CodeMode.RAYFRAME_PY or view.code_mode == "rayframe_py":
+        reasons = []
+        code = view.factor_code
+        if "aiquant_requirements" not in code:
+            reasons.append("缺少 aiquant_requirements 取数声明。")
+        if "Configs(" not in code and "DataManager(" not in code:
+            reasons.append("缺少 Configs/DataManager 配置。")
+        if "def calc" not in code:
+            reasons.append("未实现 calc 方法。")
+        passed = len(reasons) == 0
+        last_err = "; ".join(reasons) if reasons else ""
+        result = SemanticCheckResult(
+            passed=passed,
+            reason=reasons,
+            last_error=last_err,
+        )
+        return passed, result.model_dump()
+
     detail = view.check_semantics or SemanticCheckResult()
     if not isinstance(detail, SemanticCheckResult):
         detail = SemanticCheckResult(**detail)
@@ -70,7 +88,7 @@ def check_semantics_agent(state: CodeGenView | FactorAgentState) -> Tuple[bool, 
         dr = DryrunResult(**dr)
 
     # 调用语义 agent 检查运行结果和代码
-    if view.code_mode == CodeMode.PANDAS:
+    if view.code_mode == CodeMode.PANDAS or view.code_mode == CodeMode.RAYFRAME_PY or view.code_mode == "rayframe_py":
         passed = True
         detail = SemanticCheckResult(
             passed=passed,

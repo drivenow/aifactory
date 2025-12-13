@@ -7,19 +7,28 @@ import subprocess
 
 
 def get_docker_memory():
-    with open('/sys/fs/cgroup/memory/memory.limit_in_bytes') as f:
+    limit_path = '/sys/fs/cgroup/memory/memory.limit_in_bytes'
+    usage_path = '/sys/fs/cgroup/memory/memory.usage_in_bytes'
+    if not os.path.exists(limit_path) or not os.path.exists(usage_path):
+        # 非容器环境兜底
+        return 2_000_000_000
+    with open(limit_path) as f:
         byte_memory_limit = int(f.read())
-    with open('/sys/fs/cgroup/memory/memory.usage_in_bytes') as f:
+    with open(usage_path) as f:
         byte_memory_usage = int(f.read())
     return min(int((byte_memory_limit - byte_memory_usage) * 0.3), 5000000000)
 
 
 def get_docker_cpu():
-    with open('/sys/fs/cgroup/cpu/cpu.cfs_quota_us') as f:
+    quota_path = '/sys/fs/cgroup/cpu/cpu.cfs_quota_us'
+    period_path = '/sys/fs/cgroup/cpu/cpu.cfs_period_us'
+    if not os.path.exists(quota_path) or not os.path.exists(period_path):
+        return os.cpu_count() or 1
+    with open(quota_path) as f:
         cpu_quota = int(f.read())
-    with open('/sys/fs/cgroup/cpu/cpu.cfs_period_us') as f:
+    with open(period_path) as f:
         cpu_period = int(f.read())
-    return int(cpu_quota / cpu_period)
+    return max(1, int(cpu_quota / cpu_period))
 
 
 

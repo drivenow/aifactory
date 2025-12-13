@@ -63,6 +63,11 @@ def run_day_factor_value(fac_cls, start_date, end_date, factor_path, depend_fact
     fac.onRunDaysStart(start_date=all_depend_start_date, end_date=end_date)
     securities_list = get_stocks_pool(day=end_date, security_type=fac.security_type,
                                       securities=fac.security_pool)
+    # 预加载 AIQuant 声明的输入数据，calc 内部可按 dt_to 切片
+    try:
+        fac.preload_aiquant_inputs(stocks=securities_list, start_date=all_depend_start_date, end_date=end_date)
+    except Exception as e:
+        print(f"[WARNING] preload_aiquant_inputs failed: {e}")
     # quarterlag_dt_list = get_before_report_day(reform_start_date, fac.quarter_lag, end_date=end_date)
     # factor_data_ori = fac.add_dfs_lf_data(stock_list=securities_list, start_date=all_depend_start_date,
     #                                       end_date=end_date, report_date_list=quarterlag_dt_list)

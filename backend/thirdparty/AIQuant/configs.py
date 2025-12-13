@@ -483,6 +483,7 @@ config_list = [
                                'stk_asharestockrepo.tradingcode': 'symbol'}),
 
     # 分钟频
+    # 分钟衍生因子库（缓存），非 MIN_BASE 行情
     DataManager(API_TYPE='L3Factor', LIB_ID='Factormin', LIB_TYPE='factor',
                 API_START='20240101',
                 API_END='20240301',
@@ -494,16 +495,7 @@ config_list = [
 
 
 def get_library_config(library_id):
-    res = None
     for conf in config_list:
-        # TODO 因为查询数据时透传的方式，API_KWARGS中表名的key命名会各不一致，library_name/resource，后续新增其他配置的key时需要新增分支
-        if conf.API_KWARGS.get("library_name"):
-            library_name = conf.API_KWARGS["library_name"]
-        elif conf.API_KWARGS.get("resource"):
-            library_name = conf.API_KWARGS["resource"]
-        else:
-            library_name = None
-        if library_id == library_name:
-            res = conf
-            break
-    return res
+        if conf.LIB_ID == library_id:
+            return conf
+    return None

@@ -1,18 +1,35 @@
 # -*- coding: utf-8 -*-
 
 """Base Factor"""
-import ray
-import pandas as pd
 import os
+from typing import Dict, Optional
+
+import pandas as pd
+import ray
 from tqdm import trange
+
+from xquant.factorframework.rayframe.aiquant_adapter import AIQuantDataAdapter
 from xquant.factorframework.rayframe.util.data_context import get_trade_days, get_stocks_pool
 from xquant.factorframework.rayframe.util.util import get_factor_attr, parse_extra_data
 # from xquant.factorframework.rayframe import get_custom_factor_class
 from xquant.factorframework.rayframe.calculation.helper import set_ray_options, get_docker_memory
-from xquant.factorframework.rayframe.FactorDebug import run_day_factor_value
+try:
+    from xquant.factorframework.rayframe.FactorDebug import run_day_factor_value
+except Exception:  # pragma: no cover - 调试工具缺依赖时置为 None
+    run_day_factor_value = None
 from xquant.factorframework.rayframe.MetaFactor import MetaBaseFactor
 from xquant.factorframework.rayframe.util.event_trace import event_trace
-from xquant.factorframework.rayframe.mkdata.DFSDataLoader import get_panel_min_data_dfs,get_daily_data_from_dfs,get_ori_min_data_dfs
+try:
+    from xquant.factorframework.rayframe.mkdata.DFSDataLoader import get_panel_min_data_dfs, get_daily_data_from_dfs, get_ori_min_data_dfs
+except Exception:  # pragma: no cover - 缺依赖时提供空实现
+    def get_panel_min_data_dfs(*args, **kwargs):
+        return {}
+
+    def get_daily_data_from_dfs(*args, **kwargs):
+        return {}
+
+    def get_ori_min_data_dfs(*args, **kwargs):
+        return pd.DataFrame()
 
 avaliable_shared_memory = get_docker_memory()
 
@@ -48,11 +65,15 @@ class Factor(object):
     reform_window = 1  # 后置计算需要的窗口大小 默认是1 低频因子专用
     security_pool = None  # 股票池 string or list
     depend_factor = []  # 低高频通用 因子依赖的公共因子或其他的个人因子 String : “因子库名.因子名”
+    aiquant_requirements: Dict[str, object] = {}  # 统一 AIQuant 取数声明
     custom_params = {}  # 用户在动态生成因子类的时候可以自由传入参数
     external_data_memory_id_dict = dict()  # 用户依赖的外部数据的共享内存的id，与路径一一对应
     used_shared_memory = 0
     data_source = 'finchina'  # 数据源
     use_cache = False
+    _aiquant_adapter: Optional[AIQuantDataAdapter] = None
+    _aiquant_inputs: Dict[str, pd.DataFrame] = {}
+    _aiquant_loaded_window: Optional[tuple] = None
 
     def mapping_name_func(self, class_name, custom_params):
         name_suffix = []
@@ -66,6 +87,54 @@ class Factor(object):
         if self.__initialized:
             return
         self.__initialized = True
+
+    def _init_aiquant_adapter(self):
+        if self._aiquant_adapter is None:
+            self._aiquant_adapter = AIQuantDataAdapter()
+        if self._aiquant_inputs is None:
+            self._aiquant_inputs = {}
+        if not hasattr(self, "_aiquant_loaded_window"):
+            self._aiquant_loaded_window = None
+
+    def _target_freq(self):
+        return "1d" if str(self.factor_type).upper() == "DAY" else "1m"
+
+    def preload_aiquant_inputs(self, stocks=None, start_date=None, end_date=None):
+        """
+        按 aiquant_requirements 声明一次性拉取所有输入数据。
+        MIN_BASE 仍可通过现有 add_ori_min_data 获取，Factormin 等走 SDK。
+        """
+        self._init_aiquant_adapter()
+        requirements = getattr(self, "aiquant_requirements", {}) or {}
+        if not requirements:
+            return {}
+        target_freq = self._target_freq()
+        self._aiquant_inputs = self._aiquant_adapter.load_all(
+            requirements=requirements,
+            target_freq=target_freq,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        self._aiquant_loaded_window = (start_date, end_date)
+        return self._aiquant_inputs
+
+    def load_inputs(self, stocks=None, start_date=None, end_date=None, dt_to=None):
+        """
+        对外取数接口：优先使用已缓存的 aiquant_inputs，如为空则触发预加载。
+        dt_to 存在时返回截止 dt_to 的数据切片（基于 datetime 列）。
+        """
+        if (not getattr(self, "_aiquant_inputs", None)) or (self._aiquant_loaded_window != (start_date, end_date)):
+            self.preload_aiquant_inputs(stocks=stocks, start_date=start_date, end_date=end_date)
+        if dt_to is None:
+            return self._aiquant_inputs
+        dt_to_ts = pd.to_datetime(dt_to)
+        sliced = {}
+        for alias, df in self._aiquant_inputs.items():
+            if isinstance(df, pd.DataFrame) and "datetime" in df.columns:
+                sliced[alias] = df[df["datetime"] <= dt_to_ts]
+            else:
+                sliced[alias] = df
+        return sliced
 
     # 可在前置计算方法中调用的 加载外部数据文件的接口
     @classmethod

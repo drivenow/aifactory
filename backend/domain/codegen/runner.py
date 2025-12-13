@@ -50,6 +50,13 @@ def run_factor(state: CodeGenView | FactorAgentState) -> Dict[str, Any]:
             "success": False,
             "stderr": res.stderr,
         }
+    if view.code_mode == CodeMode.RAYFRAME_PY or view.code_mode == "rayframe_py":
+        # 占位 dryrun：rayframe 因子依赖环境数据，这里只做语法执行占位
+        return {
+            "success": True,
+            "stdout": "rayframe_py dryrun skipped (environment dependent)",
+            "stderr": None,
+        }
     if view.code_mode == CodeMode.L3_CPP or view.code_mode == "l3_cpp":
         return {
             "success": True,

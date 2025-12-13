@@ -21,6 +21,29 @@ def generate_l3_cpp_factor_code(view: CodeGenView) -> str:
     return agent_factor_l3_cpp.invoke_l3_cpp_agent(view)
 
 
+def generate_rayframe_factor_code(view: CodeGenView) -> str:
+    factor_name = view.factor_name or "Factor"
+    default_lib_id = "ASHAREEODPRICES"
+    return f'''import pandas as pd
+from AIQuant.datamanager import DataManager
+from xquant.factorframework.rayframe.BaseFactor import Factor
+
+
+class {factor_name}(Factor):
+    factor_type = "DAY"
+    factor_name = "{factor_name}"
+    aiquant_requirements = {{
+        "DAY_EOD": DataManager(LIB_ID="{default_lib_id}", API_START="", API_END="")
+    }}
+
+    def calc(self, factor_data=None, price_data=None, **custom_params):
+        inputs = self.load_inputs(start_date=custom_params.get("start_date"), end_date=custom_params.get("end_date"))
+        df = inputs.get("DAY_EOD")
+        # TODO: 在此填入因子计算逻辑
+        return df
+'''
+
+
 def generate_factor_with_semantic_guard(state: CodeGenView | FactorAgentState, check_agent_round = 3) -> CodeGenView:
     """
     完整工作流：生成→静态语义检查(失败可重试)→dryrun→agent 语义检查(最多 check_agent_round 轮)。
@@ -79,6 +102,8 @@ def _generate_with_static(state: CodeGenView | FactorAgentState) -> CodeGenView:
         code = generate_l3_factor_code(view)
     elif view.code_mode == CodeMode.L3_CPP or view.code_mode == "l3_cpp":
         code = generate_l3_cpp_factor_code(view)
+    elif view.code_mode == CodeMode.RAYFRAME_PY or view.code_mode == "rayframe_py":
+        code = generate_rayframe_factor_code(view)
     else:
         body = simple_factor_body_from_spec(view.user_spec)
         code = render_factor_code(view.factor_name, view.user_spec, body)

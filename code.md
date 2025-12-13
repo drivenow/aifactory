@@ -34,3 +34,18 @@ generator.py/runner.py：分流 rayframe 模板与 dryrun（构造最小 datetim
 文档更新
 
 更新 README.md 或新增 project_rules.md 补充：路径、默认对齐策略、MIN_BASE/Factormin 分工、LIB_ID 唯一入口、mock 数据放置规范。
+
+---
+
+当前已开发要点（2025-03）
+
+- 元数据：新增 `backend/thirdparty/AIQuant/meta_service.py`，从 `aiquant_factor_meta.xlsx` 以 `LIB_ID` 读取，带 TTL 缓存。
+- 数据 SDK：`datamanager.get(conf)` 统一走元数据定位 parquet，支持 `FREQ/ALIGN_POLICY/RETURN_FORMAT`；`get_library_config` 改为按 `LIB_ID`。
+- 频率对齐：`backend/thirdparty/AIQuant/data_process.py` 提供 day→min（broadcast/ffill）、min→day（agg_last）。
+- rayframe 适配：`rayframe/aiquant_adapter.py` + `BaseFactor.load_inputs/preload_aiquant_inputs` 读取 `aiquant_requirements`，不影响现有 `depend_factor`/MIN_BASE。
+- 代码助手：新增 `CodeMode.RAYFRAME_PY`，静态检查必含 `aiquant_requirements`、Configs/DataManager、`calc`；dryrun 占位返回。
+
+待补充
+
+- 增加最小示例因子与单测脚本覆盖 meta_service/get/align/adapter。
+- 文档：在 README 或 project_rules 记录默认路径、对齐策略、Factormin/MIN_BASE 分工。

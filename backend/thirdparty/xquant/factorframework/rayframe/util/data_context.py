@@ -1,6 +1,29 @@
-from xquant.factordata import FactorData
+import pandas as pd
 
-s = FactorData()
+try:
+    from xquant.factordata import FactorData  # type: ignore
+    s = FactorData()
+    _FACTOR_DATA_ERR = None
+except Exception as exc:  # pragma: no cover - 缺依赖兜底
+    _FACTOR_DATA_ERR = exc
+
+    class _DummyFD:
+        def tradingday(self, start, end):
+            # 支持 tradingday(start_str, end_str) 或 tradingday(day_str, -n)
+            if isinstance(end, str):
+                rng = pd.bdate_range(start=pd.to_datetime(start), end=pd.to_datetime(end))
+                return [d.strftime("%Y%m%d") for d in rng]
+            try:
+                end_int = int(end)
+            except Exception:
+                end_int = 0
+            rng = pd.bdate_range(end=pd.to_datetime(start), periods=abs(end_int) + 1)
+            return [d.strftime("%Y%m%d") for d in rng]
+
+        def get_factor_value(self, *args, **kwargs):
+            return pd.DataFrame()
+
+    s = _DummyFD()
 
 factype_to_facname = {
     'alpha': ['alpha1', 'alpha2', 'alpha3', 'alpha4', 'alpha5', 'alpha6', 'alpha7', 'alpha8', 'alpha9', 'alpha10',

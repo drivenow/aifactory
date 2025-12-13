@@ -1,25 +1,55 @@
-import pandas as pd
-import polars as pl
-import numpy as np
 import os
-from pydantic import BaseModel
-from xquant.thirdpartydata.factordata import FactorData as third_FD
-from xquant.factordata.factor import FactorData
-from xquant.thirdpartydata.fic_api_data import FicApiData
-from xquant.setXquantEnv import xquantEnv
 import datetime as dt
 from collections import defaultdict
-from AIQuant.data_api.index_platform_data import IndicatorData
+from typing import Dict, Iterable, List, Optional
+
+import numpy as np
+import pandas as pd
+import polars as pl
+from pydantic import BaseModel, Field
+
+from AIQuant.meta_service import ExcelMetaFactorService, MetaFactorService
+from xquant.setXquantEnv import xquantEnv
+
+try:
+    from AIQuant.data_api.index_platform_data import IndicatorData
+except Exception:
+    IndicatorData = None
+
+fd = None
+_FACTOR_DATA_ERR = None
+try:
+    from xquant.factordata.factor import FactorData  # type: ignore
+except Exception as exc:  # pragma: no cover - 缺依赖环境下提供兜底
+    _FACTOR_DATA_ERR = exc
+
+_THIRD_FD_ERR = None
+tfd = None
+try:
+    from xquant.thirdpartydata.factordata import FactorData as third_FD  # type: ignore
+except Exception as exc:  # pragma: no cover
+    _THIRD_FD_ERR = exc
+
+_FIC_ERR = None
+fic = None
+try:
+    from xquant.thirdpartydata.fic_api_data import FicApiData  # type: ignore
+except Exception as exc:  # pragma: no cover
+    _FIC_ERR = exc
+
+_IDA_ERR = None
+ida = None
+try:
+    ida = IndicatorData() if IndicatorData else None  # type: ignore
+except Exception as exc:  # pragma: no cover
+    _IDA_ERR = exc
 
 try:
     from AIQuant.data_api.hive_data import get_hive_data
-except:
-    get_hive_data=None
+except Exception:
+    get_hive_data = None
 
-fd = FactorData()
-tfd = third_FD()
-fic = FicApiData()
-ida = IndicatorData()
+DEFAULT_CACHE_BASE_PATH = "/mnt/x/RPA-github/langgraph_source/aifactory/backend/thirdparty/daily_factor"
 
 
 class DataManager(BaseModel):
@@ -32,21 +62,30 @@ class DataManager(BaseModel):
     LIB_ID: str = ''  # 唯一数据名，可以是表名或者因子库名 ZX.ASHAREEODPRICES
     API_START: str = ''
     API_END: str = ''
-    API_KWARGS: dict = {}  # API传入的运行参数, SDATE, EDATE预留关键字占位符
+    API_KWARGS: Dict = Field(default_factory=dict)  # API传入的运行参数, SDATE, EDATE预留关键字占位符
     LIB_TYPE: str = ""  # 区分是表还是因子库
-    LIB_ID_FEILD: list = []  # DATA_ID下对应的列名（对表可以是列名，对因子库可以是因子名），默认为空取所有因子或列
-    API_INDEX_COL: dict = {}  # 业务日期、标的列映射
+    LIB_ID_FEILD: List[str] = Field(default_factory=list)  # DATA_ID下对应的列名（对表可以是列名，对因子库可以是因子名），默认为空取所有因子或列
+    API_INDEX_COL: Dict = Field(default_factory=dict)  # 业务日期、标的列映射
+    FREQ: Optional[str] = None  # 数据频率，默认从元数据填充
+    ALIGN_POLICY: Optional[str] = None  # 跨频对齐策略，默认从元数据填充
+    RETURN_FORMAT: str = "long"  # 默认long格式
     if xquantEnv == 0:
-        TABLE_BASE_PATH: str = '/data/user/quanttest007/library_alpha/quant_data/SOURCE_TABLES'
-        FACTOR_BASE_PATH: str = '/data/user/quanttest007/library_alpha/quant_data/daily_factor'
+        TABLE_BASE_PATH: str = DEFAULT_CACHE_BASE_PATH
+        FACTOR_BASE_PATH: str = DEFAULT_CACHE_BASE_PATH
     else:
         TABLE_BASE_PATH: str = '/dfs/group/800657/library_alpha/quant_data/table/'  # /dfs/group/800657/library_alpha/quant_data/table/202511/ASHAREEODPRICES.parquet
         FACTOR_BASE_PATH: str = '/dfs/group/800657/library_alpha/quant_data/factor/daily_factor/'  # /dfs/group/800657/library_alpha/quant_data/factor/daily_factor/202511/Factor_xunfen1.parquet
-    EXTRA_KWARGS: dict = {}  # 个性化的其他字段，如init_date, start_date
-    LINK_IDS: list = ['013150', '022917', '011048', '016349']
+    EXTRA_KWARGS: Dict = Field(default_factory=dict)  # 个性化的其他字段，如init_date, start_date
+    LINK_IDS: List[str] = Field(default_factory=lambda: ['013150', '022917', '011048', '016349'])
 
     def split_date_by_month(self, statr_date, end_date):
-        date_list = fd.tradingday(statr_date, end_date)
+        if fd is not None:
+            date_list = fd.tradingday(statr_date, end_date)
+        else:
+            # 简单兜底：使用日历日范围
+            start = dt.datetime.strptime(statr_date, "%Y%m%d")
+            end = dt.datetime.strptime(end_date, "%Y%m%d")
+            date_list = [(start + dt.timedelta(days=i)).strftime("%Y%m%d") for i in range((end - start).days + 1)]
         month_dct = defaultdict(list)
         for date in date_list:
             month = date[:6]
@@ -205,61 +244,32 @@ class DataManager(BaseModel):
             print("日期-{0}的格式有误，请传入正确格式如'20200201'".format(check_date))
             return False
 
-    def get_data(self, conf):
-        # 1. 查询带缓存的数据，必传LIB_ID,API_START,API_END
-        # TODO LIB_ID为表名，如ASHAREEODPRICES 区分大小写
+    def get_data(self, conf, meta_service: Optional[MetaFactorService] = None):
+        """
+        统一取数入口：
+        1) 有 LIB_ID：通过元数据定位缓存，命中 parquet 读取（优先走缓存）。
+        2) 无 LIB_ID 但有 API_TYPE：透传原有查询分支。
+        """
         if conf.LIB_ID:
-            assert self.is_valid_date(conf.API_START)
-            assert self.is_valid_date(conf.API_END)
-            month_dct = self.split_date_by_month(conf.API_START, conf.API_END)
-            # TODO 1. 元数据查询LIB_ID是整表还是库因子
-            assert conf.LIB_TYPE in ["table", "factor"], "LIB_TYPE只支持 table, factor"
-            LIB_TYPE = conf.LIB_TYPE
-            if LIB_TYPE == "table":
-                base_path = conf.TABLE_BASE_PATH
-            else:
-                base_path = conf.FACTOR_BASE_PATH
-            if conf.LIB_ID_FEILD:
-                query_cols = ["datetime", "symbol"] + [i for i in conf.LIB_ID_FEILD if
-                                                       i.lower() not in ["datetime", "symbol"]]
-            else:
-                query_cols = []
-            file_path_list = []
-            for month in month_dct:
-                file_path = os.path.join(base_path, month, f"{conf.LIB_ID}.parquet")
-                if os.path.exists(file_path):
-                    file_path_list.append(file_path)
-                else:
-                    print(f"【WARNING】{conf.LIB_ID} 无 {month}月份的缓存数据")
-            if file_path_list:
-                lazy_dfs = [pl.scan_parquet(f) for f in file_path_list]
-                if query_cols:
-                    combined_lazy = pl.concat(lazy_dfs).filter(
-                        (pl.col("datetime") >= conf.API_START) & (pl.col("datetime") <= conf.API_END)).select(
-                        query_cols)
-                else:
-                    combined_lazy = pl.concat(lazy_dfs).filter(
-                        (pl.col("datetime") >= conf.API_START) & (pl.col("datetime") <= conf.API_END))
-                df = combined_lazy.collect()
-                df = df.to_pandas()
-                df = df.sort_values(by=["datetime", "symbol"])
-                df.reset_index(drop=True, inplace=True)
-                if "__index_level_0__" in df.columns:
-                    df = df.drop("__index_level_0__", axis=1)
-                return df
-            else:
-                return pd.DataFrame()
-        elif conf.API_TYPE:
+            return get(conf, meta_service=meta_service)
+
+        if conf.API_TYPE:
             if conf.API_TYPE.lower() in ["wind", "productinfo"]:
+                if tfd is None:
+                    raise ImportError(f"thirdparty FactorData not available: {_THIRD_FD_ERR}")
                 assert "library_name" in conf.API_KWARGS, "透传查询源数据，API_KWARGS需要有表名或库名library_name"
                 df = tfd.get_factor_value(**conf.API_KWARGS)
                 return df
             elif conf.API_TYPE.lower() == "zx":
+                if fic is None:
+                    raise ImportError(f"FicApiData not available: {_FIC_ERR}")
                 assert "resource" in conf.API_KWARGS, "resource：资源名称，表名，conf.API_KWARGS必传"
                 assert "paramMaps" in conf.API_KWARGS, "paramMaps：查询参数，dict，需根据表名确认可传参数，conf.API_KWARGS必传"
                 df = fic.get_fic_api_data(**conf.API_KWARGS)['data']
                 return df
             elif conf.API_TYPE.lower() == "indicator":
+                if ida is None:
+                    raise ImportError(f"IndicatorData not available: {_IDA_ERR}")
                 condition_dct = {}
                 for key, value in conf.API_KWARGS.items():
                     if key != "library_name":
@@ -267,6 +277,8 @@ class DataManager(BaseModel):
                 df = ida.get_indicator_data(**condition_dct)
                 return df
             elif conf.API_TYPE.lower() == "indicator_min":
+                if ida is None:
+                    raise ImportError(f"IndicatorData not available: {_IDA_ERR}")
                 condition_dct = {}
                 for key, value in conf.API_KWARGS.items():
                     if key != "library_name":
@@ -283,6 +295,132 @@ class DataManager(BaseModel):
                 else:
                     df = get_hive_data(**conf.API_KWARGS)
                     return df
+        return pd.DataFrame()
+
+
+def _validate_date_str(date_str: str) -> str:
+    if not date_str:
+        raise ValueError("API_START/API_END 不能为空")
+    if isinstance(date_str, int):
+        date_str = str(date_str)
+    if len(date_str) != 8:
+        raise ValueError(f"日期格式需为YYYYMMDD，当前值：{date_str}")
+    try:
+        dt.datetime.strptime(date_str, "%Y%m%d")
+    except Exception as exc:  # pragma: no cover - 统一抛出友好错误
+        raise ValueError(f"日期格式需为YYYYMMDD，当前值：{date_str}") from exc
+    return date_str
+
+
+def _month_range(start_date: str, end_date: str) -> List[str]:
+    start = dt.datetime.strptime(start_date, "%Y%m%d").date().replace(day=1)
+    end = dt.datetime.strptime(end_date, "%Y%m%d").date().replace(day=1)
+    if start > end:
+        raise ValueError("API_START 不能大于 API_END")
+    months: List[str] = []
+    cursor = start
+    while cursor <= end:
+        months.append(cursor.strftime("%Y%m"))
+        if cursor.month == 12:
+            cursor = dt.date(cursor.year + 1, 1, 1)
+        else:
+            cursor = dt.date(cursor.year, cursor.month + 1, 1)
+    return months
+
+
+def _collect_file_paths(base_path: str, library_name: str, months: Iterable[str]) -> List[str]:
+    file_path_list: List[str] = []
+    for month in months:
+        file_path = os.path.join(base_path, month, f"{library_name}.parquet")
+        if os.path.exists(file_path):
+            file_path_list.append(file_path)
+        else:
+            print(f"【WARNING】{library_name} 无 {month}月份的缓存数据")
+    return file_path_list
+
+
+def _read_parquet_with_filter(file_paths: List[str], start_date: str, end_date: str, query_cols: List[str]) -> pd.DataFrame:
+    if not file_paths:
+        return pd.DataFrame()
+    lazy_frames = [pl.scan_parquet(path).with_columns(pl.col("datetime").cast(pl.Utf8).alias("datetime")) for path in
+                   file_paths]
+    combined_lazy = pl.concat(lazy_frames).filter(
+        (pl.col("datetime") >= start_date) & (pl.col("datetime") <= end_date)
+    )
+    if query_cols:
+        combined_lazy = combined_lazy.select(query_cols)
+    df = combined_lazy.collect().to_pandas()
+    return df
+
+
+def _standardize_df(df: pd.DataFrame, required_cols: Optional[List[str]] = None) -> pd.DataFrame:
+    if df.empty:
+        return df
+    if "__index_level_0__" in df.columns:
+        df = df.drop("__index_level_0__", axis=1)
+    if "datetime" in df.columns:
+        df["datetime"] = pd.to_datetime(df["datetime"])
+    if "symbol" in df.columns:
+        df["symbol"] = df["symbol"].astype(str)
+    if required_cols:
+        for col in required_cols:
+            if col not in df.columns:
+                df[col] = np.nan
+        df = df[[col for col in required_cols if col in df.columns] + [col for col in df.columns if col not in required_cols]]
+    df = df.drop_duplicates(subset=[col for col in ["datetime", "symbol"] if col in df.columns]).sort_values(
+        by=[col for col in ["datetime", "symbol"] if col in df.columns]
+    )
+    df.reset_index(drop=True, inplace=True)
+    return df
+
+
+def _to_panel(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    value_cols = [col for col in df.columns if col not in ["datetime", "symbol"]]
+    if not value_cols:
+        return df
+    panel_df = df.pivot(index="datetime", columns="symbol")
+    panel_df = panel_df.sort_index()
+    return panel_df
+
+
+def get(conf: DataManager, meta_service: Optional[MetaFactorService] = None) -> pd.DataFrame:
+    """
+    统一数据读取接口：
+    1) 通过 LIB_ID 查元数据，定位 library_name/lib_type/freq
+    2) 读取月度 parquet 缓存并按 datetime/symbol 标准化
+    3) 按 LIB_ID_FEILD 裁剪字段（保留 datetime/symbol）
+    """
+    meta_service = meta_service or ExcelMetaFactorService()
+    conf.API_START = _validate_date_str(conf.API_START)
+    conf.API_END = _validate_date_str(conf.API_END)
+
+    meta = meta_service.get_library_meta(conf.LIB_ID)
+    conf.FREQ = conf.FREQ or getattr(meta, "freq", None)
+    conf.ALIGN_POLICY = conf.ALIGN_POLICY or getattr(meta, "align_policy", None)
+    library_name = meta.library_name
+    lib_type = meta.lib_type
+    base_path = getattr(meta, "base_path", None) or (
+        conf.TABLE_BASE_PATH if lib_type == "table" else conf.FACTOR_BASE_PATH
+    )
+
+    months = _month_range(conf.API_START, conf.API_END)
+    file_path_list = _collect_file_paths(base_path, library_name, months)
+    if not file_path_list:
+        raise FileNotFoundError(f"{library_name} 在 {base_path} 未找到可用缓存文件")
+
+    lib_fields = list(conf.LIB_ID_FEILD) if conf.LIB_ID_FEILD else []
+    if lib_fields:
+        query_cols = ["datetime", "symbol"] + [i for i in lib_fields if i.lower() not in ["datetime", "symbol"]]
+    else:
+        query_cols = []
+
+    df = _read_parquet_with_filter(file_path_list, conf.API_START, conf.API_END, query_cols)
+    df = _standardize_df(df, required_cols=["datetime", "symbol"] + lib_fields)
+    if str(conf.RETURN_FORMAT).lower() == "panel":
+        df = _to_panel(df)
+    return df
 
 
 if __name__ == '__main__':

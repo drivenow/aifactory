@@ -1,11 +1,21 @@
-from xquant.factordata import FactorData
 import datetime
 import logging
-import pandas as pd
 import os
 import traceback
+
+import pandas as pd
+
+try:
+    from xquant.factordata import FactorData
+except Exception:  # pragma: no cover - 缺依赖兜底
+    FactorData = None
+
+try:
+    import pymysql1  # type: ignore
+except Exception:  # pragma: no cover
+    pymysql1 = None
+
 from xquant.setXquantEnv import xquantEnv
-import pymysql1
 
 
 def logger_handler(task_type, logger_name, base_dir):
@@ -33,6 +43,9 @@ def logger_handler(task_type, logger_name, base_dir):
 
 
 def check_cur_parse_date():
+    if FactorData is None:
+        # 兜底：直接返回当前日期
+        return datetime.datetime.now().strftime("%Y%m%d")
     fd = FactorData()
     now_date = datetime.datetime.now().strftime("%Y%m%d")
     now_time = datetime.datetime.now().strftime("%H%M%S")
@@ -70,6 +83,8 @@ def standardizeRawCode(raw_code: str) -> str:
 class MetaData:
 
     def __init__(self):
+        if pymysql1 is None:
+            raise ImportError("pymysql1 not available, MetaData cannot initialize")
         self.library_df = None
         if xquantEnv == 0:
             sql_config = {"host": "168.64.54.128",

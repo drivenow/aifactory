@@ -23,6 +23,7 @@ class CodeMode(str, Enum):
     PANDAS = "pandas"
     L3_PY = "l3_py"
     L3_CPP = "l3_cpp"
+    RAYFRAME_PY = "rayframe_py"
 
 
 class SemanticCheckResult(BaseModel):
@@ -127,6 +128,9 @@ class CodeGenView(ViewBase):
         elif self.code_mode in (CodeMode.L3_PY, "l3_py"):
             sub_dir = "l3_py"
             suffix = ".py"
+        elif self.code_mode in (CodeMode.RAYFRAME_PY, "rayframe_py"):
+            sub_dir = "rayframe_py"
+            suffix = ".py"
         else:
             sub_dir = "pandas"
             suffix = ".py"
@@ -193,4 +197,3 @@ if __name__ == "__main__":
     view = CodeGenView.from_state(state)
     view.factor_code = "1111"
     print(view)
-
