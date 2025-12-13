@@ -1,10 +1,14 @@
 下面给你一份**“数据结构/接口定义先行”**的标准落地方案与开发规范，严格按你澄清的职责边界来：
 
 参考代码，后续都会引用到相关文件：
-[文档1：rayframe框架](https://github.com/xquant/factorframework/tree/main/rayframe)只关注BaseFactor.py部分
-[文档2：统一数据处理规范](https://github.com/xquant/factorframework/blob/main/rayframe/docs/数据存储规范.md)
+[文档1：rayframe框架](/mnt/x/RPA-github/langgraph_source/aifactory/backend/thirdparty/xquant/factorframework/rayframe)只关注BaseFactor.py部分
+[文档2：统一数据处理规范](/mnt/x/RPA-github/langgraph_source/aifactory/backend/thirdparty/数据存储规范.md)。mock数据也按照这个规范存储
 [文档3：统一数据存取接口](/mnt/x/RPA-github/langgraph_source/aifactory/backend/thirdparty/AIQuant/configs.py)
-[文档4：统一元数据标](https://github.com/xquant/factorframework/blob/main/rayframe/docs/数据存储规范.md)，通过library_id和数据进行关联
+[文档4：统一元数据标](/mnt/x/RPA-github/langgraph_source/aifactory/backend/thirdparty/aiquant_factor_meta.xlsx)，通过library_id和数据进行关联./mnt/x/RPA-github/langgraph_source/aifactory/backend/thirdparty/meta定义.md
+
+修改要求：
+可基于这两个目录的代码修改：
+/mnt/x/RPA-github/langgraph_source/aifactory/backend/thirdparty/xquant/factorframework/rayframe
 
 ---
 
@@ -36,13 +40,15 @@
 * 输入：`LIB_ID`
 * 输出：至少要能得到：
 
-  * 缓存定位信息：`library_name`、库类型（表/因子库）、频率（1d/1m）、默认 index 列（或标准化规则 id）等
+  * 缓存定位信息：`library_name`、库类型（表/因子库）、频率（1d/1m）、默认 index 列（或标准化规则 id）等, 
+  * 频率通过datamanager来获取（不需要用户传入），datamanger中在初始化的时候从元数据把频率信息加载回来。
 * 约束：元数据更新策略、唯一性（你们已在规范里定义“一次存储不能更新”等）。
 
 ### 3) Data SDK（统一取数入口）
 
 * 输入：`Configs`
 * 行为：命中缓存读 parquet；缺失则按 `API_TYPE` 回源（本期可先只做“缓存读”跑通），并且所有返回必须标准化为 `datetime/symbol`。
+* 旧 depend_factor 当前先不做兼容。
 
 ### 4) rayframe（计算框架）
 
@@ -67,20 +73,17 @@
   * 默认由元数据填充（Configs 可覆盖，默认规则为ffill，但一般不让用户写）
 * `ALIGN_POLICY: Literal["broadcast","ffill","agg_last"] | None`
 
-  * 仅当本输入频率与因子频率不一致时使用（见 2.3）
-* `SYMBOL_NORMALIZER: str | None`
-
   * 指向“标的转换规则 id”（实际规则在 SDK 内置/或从元数据拿），LLM 只能选，不许发明
 
 > 注意：这些依然属于“执行参数”，不算元数据语义。
 
 ### 2.2 元数据服务接口（DB）
 
-#### 2.2.1 MetadataSchema定义
+#### 2.2.1 MetaFactorSchema定义
 
 根据 [文档4：统一元数据标](https://github.com/xquant/factorframework/blob/main/rayframe/docs/数据存储规范.md)实现。
 ```python
-class MetaData(BaseModel):
+class MetaFactor(BaseModel):
     lib_id: str
     library_name: str
     lib_type: Literal["table","factor"]
@@ -90,26 +93,22 @@ class MetaData(BaseModel):
 
 接口：
 
-#### 2.2.2 MetadataService（DB 读取）
+#### 2.2.2 MetaFactorService（DB 读取）
 
-文件：/mnt/x/RPA-github/langgraph_source/aifactory/backend/thirdparty/AIQuant/meta_service.py
-
-```python
-class MetadataService(Protocol):
-    def get_library_meta(self, lib_id: str) -> LibraryMeta: ...
-    def list_libraries(self, **filters) -> list[LibraryMeta]: ...
-```
-
-- 输入：`lib_id`（唯一键）
-- 输出：`LibraryMeta`（包含 library_name、freq、lib_type、symbol_normalizer_id、存储位置等）
-
-#### 2.2.3 DataConfigRegistry（从 configs.py 构建）
+待修改文件（目前为空）：/mnt/x/RPA-github/langgraph_source/aifactory/backend/thirdparty/AIQuant/meta_service.py
 
 ```python
-class DataConfigRegistry:
+class MetaFactorService(Protocol):
+    def get_library_meta(self, lib_id: str) -> MetaFactor: ...
+    def list_libraries(self, **filters) -> list[MetaFactor]: ...
     def get(self, lib_id: str) -> DataManager | None: ...
 ```
 
+- 输入：`lib_id`（唯一键）
+- 输出：`DataManager`（包含 library_name、freq、lib_type、存储位置等）
+
+- 先读取[文档4：统一元数据标](/mnt/x/RPA-github/langgraph_source/aifactory/backend/thirdparty/aiquant_factor_meta.xlsx)，后续再扩展数据库。
+- 缓存路径，/mnt/x/RPA-github/langgraph_source/aifactory/backend/thirdparty/daily_factor，mock数据也按照这个规范存储[文档2：统一数据处理规范](/mnt/x/RPA-github/langgraph_source/aifactory/backend/thirdparty/数据存储规范.md)。
 - **必须以 `LIB_ID` 建索引**（而不是匹配 `API_KWARGS["library_name"]/["resource"]`）来替换当前 `get_library_config` 的实现缺陷。
 
 
@@ -120,8 +119,8 @@ class DataConfigRegistry:
 ```python
 def get(conf: Configs) -> pd.DataFrame:
     """
-    1) 通过 conf.LIB_ID 查元数据得到 library_name/lib_type/freq/默认 index col/normalizer
-    2) 命中缓存则按存储规范读 parquet（表：按年/或按月；因子库：按月 library_name.parquet）:contentReference[oaicite:7]{index=7}
+    1) 通过 conf.LIB_ID 查元数据得到 library_name/lib_type/freq/默认 index col
+    2) 命中缓存则按存储规范读 parquet（表：按月；因子库：按月 library_name.parquet）:contentReference[oaicite:7]{index=7}
     3) 按 conf.LIB_ID_FEILD 选列（datetime/symbol 永远保留）
     4) `RETURN_FORMAT: Literal["long","panel"] = "long"`（默认 long）
     """
@@ -137,7 +136,7 @@ rayframe Factor 的核心契约是重写 `calc()`，框架负责调度。这部�
 
 
 ```python
-data_requirements: dict[str, DataManager] = {
+aiquant_requirements: dict[str, DataManager] = {
    "MIN_BASE": DataManager(LIB_ID="L3_MIN_DATA", FREQ="1m", ...),
    "DERIVED_MIN": DataManager(LIB_ID="Factormin", FREQ="1m", ...),
    "DAY_EOD": DataManager(LIB_ID="ASHAREEODPRICES", FREQ="1d", LIB_ID_FEILD=[...]),
@@ -153,13 +152,14 @@ rayframe 侧提供统一加载：
 
 * MIN_BASE / Factormin 的定位
 
-    - `MIN_BASE (= L3_MIN_DATA)`：作为 **基础分钟行情**，进入元数据（freq=1m, lib_type=table），并在 DataConfigRegistry 有对应条目（可以复用 rayframe 原有接入，不要求立刻迁移）。
-    - `Factormin`：作为 **分钟衍生因子库**（lib_type=factor, freq=1m），可作为 data_requirements 的一个输入（你 configs.py 里也有它作为 L3Factor/factor 的配置）。
+    - `MIN_BASE (= L3_MIN_DATA)`：作为 **基础分钟行情**，进入元数据（freq=1m, lib_type=table），并在 DataConfigRegistry 有对应条目（可以复用 rayframe 原有接入，不要求立刻迁移，不需要在元数据中存储）。
+    - `Factormin`：作为 **分钟衍生因子库**（lib_type=factor, freq=1m），可作为 aiquant_requirements 的一个输入（你 configs.py 里也有它作为 L3Factor/factor 的配置）。
 
 
 ### 2.5 频率对齐接口（仅 1m/1d）
 
-统一做成 SDK/rayframe 的一个函数（不要让每个因子自己 merge）：
+统一做成 AIQuant SDK 中的一个函数（不要让每个因子自己 merge）, 放在新增文件(/mnt/x/RPA-github/langgraph_source/aifactory/backend/thirdparty/AIQuant/data_process.py), factor 的目标频率通过datamanager来获取，datamager中在初始化的时候从元数据把频率信息加载回来。
+
 
 * `align(source_df, source_freq, target_freq, method) -> aligned_df`
 
@@ -182,7 +182,7 @@ method策略（本期只实现 3 个就够跑）：
 
 ### 3.2 关键约束（写进 lint / 静态检查）
 
-* 因子代码禁止直接访问第三方数据源；必须通过 `data_requirements -> sdk.get()`。
+* 因子代码禁止直接访问第三方数据源；必须通过 `aiquant_requirements -> sdk.get()`。
 * `datetime/symbol` 必须存在且类型正确（datetime 为 pandas datetime64 / 或统一字符串规范）。
 * 缺 Configs / 缺元数据：必须 fail fast（报“不可治理”，不要 silent fallback）。
 
@@ -203,7 +203,7 @@ method策略（本期只实现 3 个就够跑）：
 
 A1. `meta.get_by_lib_id(lib_id)`
 
-* 验收：输入一个 LIB_ID，返回 library_name/lib_type/freq/index_cols/symbol_normalizer（字段可逐步补齐）。
+* 验收：输入一个 LIB_ID，返回 library_name/lib_type/freq/index_cols（字段可逐步补齐）。
   A2. 本地缓存（LRU/TTL）
 * 验收：同一 lib_id 在 TTL 内不重复打 DB。
 
@@ -213,17 +213,17 @@ A1. `meta.get_by_lib_id(lib_id)`
 
 B1. parquet 定位器（按规范拼路径）
 
-* 表：按你们规范的 table_base_dir/table_name/年.parquet（或你们真实实现的月分区也行，接口不变）
-* 因子库：factor_base_dir/月份/library_name.parquet 
+* 表：按你们规范的 /mnt/x/RPA-github/langgraph_source/aifactory/backend/thirdparty/daily_factor/month/table.parquet（或你们真实实现的月分区也行，接口不变）
+* 因子库：langgraph_source/aifactory/backend/thirdparty/daily_factor/month/library_name.parquet 
 * 验收：给 start/end 自动计算需要的分区文件列表。
 
 B2. 跨分区拼接 + 去重排序
 
-* 验收：跨月/跨年读取不漏不重；按 `(datetime,symbol)` 去重且排序。
+* 验收：跨月读取不漏不重；按 `(datetime,symbol)` 去重且排序。
 
 B3. 标准化 pipeline
 
-* rename（按元数据 default_index_cols）→ datetime parse → symbol normalize → 保留 datetime/symbol
+* rename（按元数据 default_index_cols）→ datetime parse → 保留 datetime/symbol
 * 验收：返回 DF 必含 `datetime/symbol`，且与存储规范一致。
 
 B4. 字段裁剪（LIB_ID_FEILD）
@@ -246,9 +246,13 @@ C2. `align_min_to_day(policy=agg_last)`
 
 ### Epic D：rayframe 适配（MIN_BASE 保持现有，新增“Configs 输入”）
 
-D1. `Factor.load_inputs()`：读取 data_requirements
+- rayframe的适配层不要跟原来的rayframe耦合， 还是新建适配模块再在因子基类中调用。
+- 而是在FactorBase中增加一个取数接口，调用适配层，程序启动的时候先初始化这个接口加载数据。
+- FactorBase的calc方法中调用这个接口来获取数据，此时根据calc的日期参数获取一个数据切片。
 
-* 验收：因子无需手写取数；输入 dict key 与 data_requirements alias 一致。
+D1. `Factor.load_inputs()`：读取 aiquant_requirements
+
+* 验收：因子无需手写取数；输入 dict key 与 aiquant_requirements alias 一致。
 
 D2. MIN_BASE / Factormin 区分
 
@@ -258,7 +262,7 @@ D2. MIN_BASE / Factormin 区分
 
 D3. 回退兼容（可选）：把旧 `depend_factor` 翻译成 Configs（仅 BasicDayFactor 类）
 
-* 验收：旧因子不改代码也能跑，但新因子强制用 data_requirements。
+* 验收：旧因子不改代码也能跑，但新因子强制用 aiquant_requirements。
 
 ---
 
@@ -276,13 +280,13 @@ E2. rayframe 专用 Prompt / 模板
 
   * `class FactorXxx(Factor):`
   * `factor_type = "DAY"/"MIN"`
-  * `data_requirements = {...Configs...}`
+  * `aiquant_requirements = {...Configs...}`
   * `def calc(self, factor_data, price_data, **custom_params): ...`
 * 验收：生成代码可被 import，不包含直接取数。
 
 E3. 静态语义检查（rayframe 版）
 
-* 必须包含 `data_requirements` 与 `Configs(`；
+* 必须包含 `aiquant_requirements` 与 `Configs(`；
 * 必须实现 `calc`；
 * 禁止出现直接数据源调用关键字（你们内部可列黑名单）。
 
