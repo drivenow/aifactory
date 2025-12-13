@@ -51,12 +51,63 @@ def run_factor(state: CodeGenView | FactorAgentState) -> Dict[str, Any]:
             "stderr": res.stderr,
         }
     if view.code_mode == CodeMode.RAYFRAME_PY or view.code_mode == "rayframe_py":
-        # 占位 dryrun：rayframe 因子依赖环境数据，这里只做语法执行占位
-        return {
-            "success": True,
-            "stdout": "rayframe_py dryrun skipped (environment dependent)",
-            "stderr": None,
-        }
+        try:
+            import pandas as pd  # 本地最小依赖
+        except Exception as exc:  # pragma: no cover - pandas 缺失兜底
+            return {
+                "success": False,
+                "stderr": f"rayframe_py dryrun 失败：缺少 pandas ({exc})",
+            }
+
+        try:
+            local_env: Dict[str, Any] = {}
+            exec(view.factor_code, local_env, local_env)  # noqa: S102 - 受控 dryrun
+            factor_cls = None
+            for obj in local_env.values():
+                if isinstance(obj, type) and hasattr(obj, "calc"):
+                    factor_cls = obj
+                    break
+            if factor_cls is None:
+                raise RuntimeError("未找到因子类定义")
+
+            fac = factor_cls()
+            requirements = getattr(fac, "aiquant_requirements", {}) or {}
+            dummy_inputs = {}
+            dummy_ts = pd.to_datetime("2020-01-02")
+            for alias, conf in requirements.items():
+                lib_id = getattr(conf, "LIB_ID", None)
+                fields = getattr(conf, "LIB_ID_FEILD", []) or []
+                if isinstance(conf, dict):
+                    lib_id = conf.get("LIB_ID", lib_id) or str(alias)
+                    fields = conf.get("LIB_ID_FEILD") or fields
+                lib_prefix = lib_id or str(alias)
+                symbols = ["TEST"]
+                idx = pd.DatetimeIndex([dummy_ts])
+                if fields:
+                    for field in fields:
+                        df = pd.DataFrame([0.0], index=idx, columns=symbols)
+                        dummy_inputs[f"{lib_prefix}.{field}"] = df
+                        dummy_inputs[f"{alias}.{field}"] = df
+                else:
+                    df = pd.DataFrame([0.0], index=idx, columns=symbols)
+                    dummy_inputs[lib_prefix] = df
+                    dummy_inputs[str(alias)] = df
+            # 覆盖 load_inputs，避免真实取数
+            fac.load_inputs = lambda *args, **kwargs: dummy_inputs  # type: ignore[attr-defined]
+            res = fac.calc(factor_data={}, price_data={}, dt_to="2020-01-02")
+            preview = str(res)
+            if len(preview) > 200:
+                preview = preview[:200] + "... (truncated)"
+            return {
+                "success": True,
+                "stdout": preview,
+                "stderr": None,
+            }
+        except Exception as exc:  # pragma: no cover - dryrun 兜底
+            return {
+                "success": False,
+                "stderr": f"rayframe_py dryrun 失败：{exc}",
+            }
     if view.code_mode == CodeMode.L3_CPP or view.code_mode == "l3_cpp":
         return {
             "success": True,

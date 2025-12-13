@@ -53,6 +53,18 @@ def check_semantics_static(state:  CodeGenView | FactorAgentState) -> Tuple[bool
             reasons.append("缺少 Configs/DataManager 配置。")
         if "def calc" not in code:
             reasons.append("未实现 calc 方法。")
+        # 禁止直接访问数据源（必须通过 aiquant_requirements -> SDK）
+        blacklist = [
+            "get_hive_data",
+            "FactorData(",
+            "thirdpartydata",
+            "FicApiData(",
+            "IndicatorData(",
+            "get_factor_value(",
+        ]
+        for kw in blacklist:
+            if kw in code:
+                reasons.append(f"检测到禁止直接取数关键字：{kw}")
         passed = len(reasons) == 0
         last_err = "; ".join(reasons) if reasons else ""
         result = SemanticCheckResult(

@@ -6,7 +6,11 @@ from domain.codegen.framework.factor_mock_tool import (
     simple_factor_body_from_spec,
 )
 
-from domain.codegen.agent_with_prompt import agent_factor_l3_cpp, agent_factor_l3_py
+from domain.codegen.agent_with_prompt import (
+    agent_factor_l3_cpp,
+    agent_factor_l3_py,
+    agent_factor_rayframe_py,
+)
 from domain.codegen.view import CodeGenView, CodeMode, DryrunResult, SemanticCheckResult
 from domain.codegen.semantic import check_semantics_static, check_semantics_agent
 from domain.codegen.runner import run_factor
@@ -22,26 +26,7 @@ def generate_l3_cpp_factor_code(view: CodeGenView) -> str:
 
 
 def generate_rayframe_factor_code(view: CodeGenView) -> str:
-    factor_name = view.factor_name or "Factor"
-    default_lib_id = "ASHAREEODPRICES"
-    return f'''import pandas as pd
-from AIQuant.datamanager import DataManager
-from xquant.factorframework.rayframe.BaseFactor import Factor
-
-
-class {factor_name}(Factor):
-    factor_type = "DAY"
-    factor_name = "{factor_name}"
-    aiquant_requirements = {{
-        "DAY_EOD": DataManager(LIB_ID="{default_lib_id}", API_START="", API_END="")
-    }}
-
-    def calc(self, factor_data=None, price_data=None, **custom_params):
-        inputs = self.load_inputs(start_date=custom_params.get("start_date"), end_date=custom_params.get("end_date"))
-        df = inputs.get("DAY_EOD")
-        # TODO: 在此填入因子计算逻辑
-        return df
-'''
+    return agent_factor_rayframe_py.invoke_rayframe_agent(view)
 
 
 def generate_factor_with_semantic_guard(state: CodeGenView | FactorAgentState, check_agent_round = 3) -> CodeGenView:

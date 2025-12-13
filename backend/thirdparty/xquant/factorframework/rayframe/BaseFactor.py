@@ -8,6 +8,7 @@ import pandas as pd
 import ray
 from tqdm import trange
 
+from AIQuant.datamanager import DataManager
 from xquant.factorframework.rayframe.aiquant_adapter import AIQuantDataAdapter
 from xquant.factorframework.rayframe.util.data_context import get_trade_days, get_stocks_pool
 from xquant.factorframework.rayframe.util.util import get_factor_attr, parse_extra_data
@@ -103,35 +104,82 @@ class Factor(object):
         """
         按 aiquant_requirements 声明一次性拉取所有输入数据。
         MIN_BASE 仍可通过现有 add_ori_min_data 获取，Factormin 等走 SDK。
+        返回结构：dict[alias] -> DataFrame（index=datetime，columns=symbol 或 MultiIndex(field, symbol)），列已对齐统一标的。
         """
         self._init_aiquant_adapter()
         requirements = getattr(self, "aiquant_requirements", {}) or {}
         if not requirements:
             return {}
+        # 预先解析 LIB_ID，确保下游 key 使用 library_id.field 形式
+        alias_meta = {}
+        for alias, conf in requirements.items():
+            try:
+                dm_conf = conf if isinstance(conf, DataManager) else DataManager(**conf)
+                alias_meta[alias] = self._aiquant_adapter.resolve_meta(dm_conf)
+            except Exception:
+                alias_meta[alias] = None
         target_freq = self._target_freq()
-        self._aiquant_inputs = self._aiquant_adapter.load_all(
+        raw_inputs = self._aiquant_adapter.load_all(
             requirements=requirements,
             target_freq=target_freq,
             start_date=start_date,
             end_date=end_date,
         )
+        # 展平多字段：library_id.field -> DataFrame（index=datetime, columns=symbol）
+        self._aiquant_inputs = {}
+        for alias, df in raw_inputs.items():
+            prefix = alias_meta.get(alias).lib_id if alias_meta.get(alias) is not None else alias
+            if isinstance(df, dict):
+                for field, sub in df.items():
+                    self._aiquant_inputs[f"{prefix}.{field}"] = sub
+            elif isinstance(df, pd.DataFrame):
+                if df.columns.nlevels > 1:
+                    for field in df.columns.get_level_values(0).unique():
+                        sub = df.xs(field, level=0, axis=1, drop_level=True)
+                        self._aiquant_inputs[f"{prefix}.{field}"] = sub
+                else:
+                    self._aiquant_inputs[prefix] = df
+            else:
+                self._aiquant_inputs[prefix] = df
         self._aiquant_loaded_window = (start_date, end_date)
         return self._aiquant_inputs
 
-    def load_inputs(self, stocks=None, start_date=None, end_date=None, dt_to=None):
+    def load_inputs(self, stocks=None, start_date=None, end_date=None, dt_from=None, dt_to=None):
         """
-        对外取数接口：优先使用已缓存的 aiquant_inputs，如为空则触发预加载。
-        dt_to 存在时返回截止 dt_to 的数据切片（基于 datetime 列）。
+        对外取数接口：返回 panel 形式的数据。默认使用预加载结果，calc 内无需传 start/end。
+        dt_from/dt_to 可选：按 datetime 索引切片窗口 [dt_from, dt_to]。
         """
-        if (not getattr(self, "_aiquant_inputs", None)) or (self._aiquant_loaded_window != (start_date, end_date)):
+        if (not getattr(self, "_aiquant_inputs", None)) or (
+            (start_date or end_date) and self._aiquant_loaded_window != (start_date, end_date)
+        ):
             self.preload_aiquant_inputs(stocks=stocks, start_date=start_date, end_date=end_date)
-        if dt_to is None:
+        dt_from_ts = pd.to_datetime(dt_from) if dt_from is not None else None
+        dt_to_ts = pd.to_datetime(dt_to) if dt_to is not None else None
+        if dt_from_ts is None and dt_to_ts is None:
             return self._aiquant_inputs
-        dt_to_ts = pd.to_datetime(dt_to)
         sliced = {}
         for alias, df in self._aiquant_inputs.items():
-            if isinstance(df, pd.DataFrame) and "datetime" in df.columns:
-                sliced[alias] = df[df["datetime"] <= dt_to_ts]
+            if isinstance(df, pd.DataFrame):
+                if isinstance(df.index, pd.DatetimeIndex):
+                    if dt_from_ts is not None and dt_to_ts is not None:
+                        sliced[alias] = df.loc[(df.index >= dt_from_ts) & (df.index <= dt_to_ts)]
+                    elif dt_from_ts is not None:
+                        sliced[alias] = df.loc[df.index >= dt_from_ts]
+                    elif dt_to_ts is not None:
+                        sliced[alias] = df.loc[df.index <= dt_to_ts]
+                    else:
+                        sliced[alias] = df
+                elif "datetime" in df.columns:
+                    if dt_from_ts is not None and dt_to_ts is not None:
+                        sliced[alias] = df[(df["datetime"] >= dt_from_ts) & (df["datetime"] <= dt_to_ts)]
+                    elif dt_from_ts is not None:
+                        sliced[alias] = df[df["datetime"] >= dt_from_ts]
+                    elif dt_to_ts is not None:
+                        sliced[alias] = df[df["datetime"] <= dt_to_ts]
+                    else:
+                        sliced[alias] = df
+                else:
+                    sliced[alias] = df
             else:
                 sliced[alias] = df
         return sliced

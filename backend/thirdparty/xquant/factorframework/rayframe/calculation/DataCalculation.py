@@ -41,9 +41,10 @@ def run_day_factor_value(fac_cls, start_date, end_date, factor_path, depend_fact
     check_factor_type(fac.factor_type)
     # 校验security_type
     check_security_type(fac.security_type)
-    # 校验depend_factor
-    if len(fac.depend_factor) == 0 and fac.factor_type == "DAY":
-        raise Exception("低频因子的开发必须传入所依赖的因子")
+    # 校验依赖声明：允许 depend_factor 或 aiquant_requirements（二者至少一个）
+    aiquant_reqs = getattr(fac, "aiquant_requirements", {}) or {}
+    if len(fac.depend_factor) == 0 and fac.factor_type == "DAY" and not aiquant_reqs:
+        raise Exception("低频因子的开发必须传入所依赖的因子或 aiquant_requirements")
     # 校验数据播放窗口
     check_lag_date(fac.day_lag, fac.quarter_lag)
     tradingdays = get_trade_days(start_date, end_date)
