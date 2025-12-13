@@ -8,6 +8,19 @@ import re
 import os
 os.environ["OPENAI_BASE_URL"] = "https://api.siliconflow.cn/v1"
 os.environ["OPENAI_API_KEY"] = "sk-kcprjafyronffotrpxxovupsxzqolveqkypbmubjsopdbxec"
+os.environ["MODEL_NAME"] = "Pro/deepseek-ai/DeepSeek-R1"
+
+#os.environ["OPENAI_BASE_URL"] = "http://168.9.88.8:8085/llm-service/v1"
+#os.environ["OPENAI_API_KEY"] = "000465@370f2aaab73047e4809331b458183970"
+#os.environ["OPENAI_API_KEY"] = "000465@4df242f899ac4daabb4dfec5f7d3f177"
+#os.environ["MODEL_NAME"] = "local-qwen3-235b-nothink-moe"
+
+
+# os.environ["OPENAI_BASE_URL"] = "http://168.17.250.210:10002/v1"
+# os.environ["OPENAI_API_KEY"] = "xquant"
+# os.environ["MODEL_NAME"] = "Qwen3-32B"
+
+
 
 def create_agent(tools: Optional[List[Any]] = None):
     """Thin wrapper to allow monkeypatch in tests."""
@@ -32,7 +45,7 @@ def _unwrap_agent_code(txt: str, lang: str = "python") -> str:
     return txt
 
 
-def get_llm(model_name = "Pro/deepseek-ai/DeepSeek-R1"):
+def get_llm(model_name = os.environ["MODEL_NAME"]):
     base_url = os.getenv("OPENROUTER_URL") or os.getenv("OPENAI_BASE_URL")
     api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
     model = os.getenv("LLM_MODEL", model_name)

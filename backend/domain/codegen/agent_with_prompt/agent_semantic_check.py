@@ -49,6 +49,10 @@ def invoke_semantic_agent(view: CodeGenView, dryrun: DryrunResult) -> SemanticCh
         f"stdout:\n{dryrun.stdout or ''}\n"
         f"stderr:\n{dryrun.stderr or ''}\n"
     )
+    print("============invoke_semantic_agent=============")
+    print(user_content)
+    print(SEMANTIC_CHECK_PROMPT)
+    print("=============invoke_semantic_agent============")
     sys = SystemMessage(content=SEMANTIC_CHECK_PROMPT)
     user = HumanMessage(content=user_content)
 
