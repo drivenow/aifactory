@@ -181,4 +181,13 @@ secrets/
 .next/
 node_modules/
 tmp/
-thirdparty/
+# 忽略 thirdparty 下所有内容
+backend/thirdparty/**/*
+
+# 放行 rayframe 及其父目录
+!backend/thirdparty/AIQuant
+!backend/thirdparty/AIQuant/**
+!backend/thirdparty/xquant/
+!backend/thirdparty/xquant/factorframework/
+!backend/thirdparty/xquant/factorframework/rayframe/
+!backend/thirdparty/xquant/factorframework/rayframe/**
